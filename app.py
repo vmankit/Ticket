@@ -1806,4 +1806,12 @@ def generate_ticket():
 
 
 if __name__ == "__main__":
-    app.run(debug=True, port=5000)
+    import sys
+    port = int(os.environ.get("PORT", 5000))
+    # Disable the reloader and debug mode for hosted environments that
+    # restrict signal.signal usage (e.g., Streamlit Cloud).
+    try:
+        app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
+    except Exception as e:
+        print("Failed to start Flask dev server:", e)
+        sys.exit(1)

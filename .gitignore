@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+venv/
+.env
+.idea/
+.vscode/
+*.pdf
+ticket_output.pdf
+node_modules/
+dist/
+build/
+*.egg-info/

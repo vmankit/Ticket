@@ -1,0 +1,6 @@
+flask
+flask-wtf
+reportlab
+openpyxl
+qrcode[pil]
+pdfplumber

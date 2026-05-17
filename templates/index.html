@@ -1,0 +1,1084 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bharat Horizon Travels — E-Ticket Generator</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+        :root{--primary:#0f2742;--primary-light:#1f456a;--primary-dark:#081727;--accent:#0e9488;--accent-soft:#e7f7f5;--surface:#fff;--surface-alt:#f6f8fb;--bg:#eef2f6;--text:#162033;--text-muted:#667085;--border:#d9e0ea;--success:#14845f;--danger:#c24135;--gold:#b7791f;--shadow:0 14px 40px rgba(15,39,66,.08);--shadow-lg:0 24px 70px rgba(15,39,66,.12)}
+        html{scroll-behavior:smooth}
+        body{font-family:'Inter',-apple-system,sans-serif;background:linear-gradient(180deg,#f7f9fc 0%,var(--bg) 100%);color:var(--text);min-height:100vh;line-height:1.6}
+        body::before{content:'';position:fixed;inset:0;background:linear-gradient(90deg,rgba(15,39,66,.05) 1px,transparent 1px),linear-gradient(180deg,rgba(15,39,66,.04) 1px,transparent 1px);background-size:44px 44px;mask-image:linear-gradient(180deg,rgba(0,0,0,.65),transparent 70%);pointer-events:none;z-index:0}
+
+        .header{background:var(--primary-dark);padding:24px 0 20px;text-align:left;position:relative;overflow:hidden;box-shadow:0 10px 30px rgba(8,23,39,.18);border-bottom:1px solid rgba(255,255,255,.08)}
+        .header::before{content:'';position:absolute;inset:auto -10% -80px -10%;height:140px;background:linear-gradient(90deg,transparent,rgba(14,148,136,.35),transparent);transform:skewY(-3deg)}
+        .header-inner{max-width:1080px;margin:0 auto;padding:0 24px;position:relative;z-index:1;display:flex;align-items:flex-end;justify-content:space-between;gap:24px}
+        .brand-mark{width:44px;height:44px;border-radius:12px;background:var(--accent);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;letter-spacing:.5px;box-shadow:0 12px 30px rgba(14,148,136,.35)}
+        .brand-copy{display:flex;align-items:center;gap:14px}
+        .header h1{color:#fff;font-size:1.65rem;font-weight:800;letter-spacing:.8px;position:relative;z-index:1}
+        .header p{color:rgba(255,255,255,.72);font-size:.85rem;margin-top:1px;letter-spacing:.2px;position:relative;z-index:1}
+        .header .db-badge{display:inline-flex;align-items:center;background:rgba(255,255,255,.08);color:rgba(255,255,255,.86);padding:7px 12px;border-radius:999px;font-size:.72rem;font-weight:600;border:1px solid rgba(255,255,255,.12);position:relative;z-index:1;white-space:nowrap}
+
+        .container{max-width:1080px;margin:28px auto 40px;padding:0 24px;position:relative;z-index:1}
+        .card{background:rgba(255,255,255,.96);border-radius:10px;box-shadow:var(--shadow);overflow:hidden;border:1px solid rgba(217,224,234,.9);margin-bottom:18px;backdrop-filter:blur(12px)}
+        .card-header{background:#fff;padding:17px 22px;display:flex;align-items:center;gap:12px;border-bottom:1px solid var(--border)}
+        .card-header h2{color:var(--primary);font-size:.98rem;font-weight:750;letter-spacing:.2px}
+        .card-header .icon{width:32px;height:32px;background:var(--accent-soft);color:var(--accent);border:1px solid rgba(14,148,136,.18);border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:.74rem;font-weight:800;letter-spacing:.4px}
+        .card-body{padding:24px}
+
+        .section-title{font-size:.7rem;font-weight:800;letter-spacing:1.6px;text-transform:uppercase;color:var(--primary-light);margin-bottom:15px;padding-bottom:8px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px}
+        .section-title .dot{width:8px;height:8px;background:var(--accent);border-radius:2px;transform:rotate(45deg)}
+
+        .form-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:24px}
+        .form-grid.three-col{grid-template-columns:1fr 1fr 1fr}
+        .form-grid.four-col{grid-template-columns:1fr 1fr 1fr 1fr}
+        .form-group{position:relative}
+        .form-group.full-width{grid-column:1/-1}
+        .form-group label{display:block;font-size:.73rem;font-weight:700;color:var(--text);margin-bottom:6px;letter-spacing:.15px}
+        .form-group label .req{color:#e53935;margin-left:2px}
+        .form-group input,.form-group select{width:100%;padding:11px 12px;border:1px solid var(--border);border-radius:8px;font-size:.86rem;font-family:'Inter',sans-serif;color:var(--text);background:#fff;transition:all .2s;outline:none}
+        .form-group input:focus,.form-group select:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(14,148,136,.12)}
+        .form-group input::placeholder{color:#a5afbf}
+        .form-group .helper{font-size:.68rem;color:var(--text-muted);margin-top:3px;min-height:14px}
+        .form-group .helper.detected{color:var(--success);font-weight:500}
+        .airline-match{display:flex;align-items:center;gap:7px;margin-top:4px}
+        .airline-logo{width:24px;height:24px;object-fit:contain;border:1px solid var(--border);border-radius:6px;background:#fff;padding:2px}
+
+        .separator{height:1px;background:var(--border);margin:8px 0 24px}
+
+        /* Flight segment */
+        .flight-segment{border:1px solid var(--border);border-radius:10px;padding:20px;margin-bottom:16px;position:relative;background:var(--surface-alt);transition:box-shadow .2s,border-color .2s}
+        .flight-segment:hover{box-shadow:0 8px 24px rgba(15,39,66,.07);border-color:#c6d0dc}
+        .flight-segment .seg-label{position:absolute;top:-10px;left:16px;background:var(--primary);color:#fff;font-size:.64rem;font-weight:800;padding:3px 10px;border-radius:999px;letter-spacing:.9px}
+        .flight-segment .remove-flight{position:absolute;top:8px;right:8px;background:none;border:none;color:var(--danger);cursor:pointer;font-size:1.1rem;padding:4px 8px;border-radius:6px;transition:background .2s}
+        .flight-segment .remove-flight:hover{background:rgba(198,40,40,.08)}
+
+        .layover-indicator{display:flex;align-items:center;justify-content:center;gap:8px;padding:10px;margin-bottom:16px;color:var(--gold);font-size:.78rem;font-weight:600}
+        .layover-indicator .layover-line{flex:1;height:1px;background:linear-gradient(90deg,transparent,var(--gold),transparent)}
+
+        .btn-add-flight{display:flex;align-items:center;justify-content:center;gap:6px;width:100%;padding:12px;border:1px dashed #a7b3c2;border-radius:10px;background:#fff;color:var(--primary);font-size:.84rem;font-weight:750;cursor:pointer;transition:all .2s;font-family:'Inter',sans-serif;margin-bottom:20px}
+        .btn-add-flight:hover{border-color:var(--accent);background:var(--accent-soft);color:#08766d}
+
+        /* Passenger row */
+        .pax-row{border:1px solid var(--border);border-radius:10px;padding:18px;margin-bottom:14px;position:relative;background:var(--surface-alt)}
+        .pax-row .pax-label{position:absolute;top:-9px;left:14px;background:var(--accent);color:#fff;font-size:.62rem;font-weight:800;padding:2px 9px;border-radius:999px}
+        .pax-row .remove-pax{position:absolute;top:6px;right:6px;background:none;border:none;color:var(--danger);cursor:pointer;font-size:1rem;padding:3px 6px;border-radius:5px}
+        .btn-add-pax{display:flex;align-items:center;justify-content:center;gap:6px;width:100%;padding:11px;border:1px dashed #a7b3c2;border-radius:10px;background:#fff;color:var(--accent);font-size:.82rem;font-weight:750;cursor:pointer;transition:all .2s;font-family:'Inter',sans-serif;margin-bottom:20px}
+        .btn-add-pax:hover{border-color:var(--accent);background:var(--accent-soft)}
+
+        /* Route display */
+        .route-display{background:var(--surface-alt);border:1.5px dashed var(--border);border-radius:12px;padding:14px 20px;margin-bottom:20px;display:flex;align-items:center;justify-content:center;gap:16px;min-height:50px;transition:all .3s}
+        .route-display.active{border-color:var(--primary);background:linear-gradient(135deg,rgba(26,35,126,.04),rgba(13,71,161,.04))}
+        .route-city{text-align:center}
+        .route-city .code{font-size:1.3rem;font-weight:800;color:var(--primary);letter-spacing:2px}
+        .route-city .name{font-size:.68rem;color:var(--text-muted);margin-top:1px}
+        .route-arrow{display:flex;flex-direction:column;align-items:center;gap:2px}
+        .route-arrow .line{width:50px;height:2px;background:linear-gradient(90deg,var(--primary),var(--accent));border-radius:1px;position:relative}
+        .route-arrow .line::after{content:'';position:absolute;top:-3px;right:-2px;width:8px;height:8px;border-top:2px solid var(--primary);border-right:2px solid var(--primary);transform:rotate(45deg)}
+        .route-arrow .label{font-size:.6rem;font-weight:600;letter-spacing:1px;color:var(--text-muted)}
+
+        /* Autocomplete */
+        .autocomplete-wrapper{position:relative}
+        .autocomplete-list{position:absolute;top:100%;left:0;right:0;background:var(--surface);border:1.5px solid var(--border);border-radius:10px;box-shadow:var(--shadow);max-height:240px;overflow-y:auto;z-index:100;display:none;margin-top:3px}
+        .autocomplete-list.visible{display:block;animation:dropIn .2s ease}
+        @keyframes dropIn{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:translateY(0)}}
+        .autocomplete-item{padding:8px 12px;cursor:pointer;font-size:.8rem;display:flex;align-items:center;gap:8px;transition:background .15s;border-bottom:1px solid rgba(197,202,233,.3)}
+        .autocomplete-item:last-child{border-bottom:none}
+        .autocomplete-item:hover{background:var(--surface-alt)}
+        .autocomplete-item .ac-code{font-weight:700;color:var(--primary);font-size:.85rem;min-width:34px;background:var(--surface-alt);padding:2px 5px;border-radius:4px;text-align:center}
+        .autocomplete-item .ac-info{flex:1;min-width:0}
+        .autocomplete-item .ac-city{font-weight:600;font-size:.8rem}
+        .autocomplete-item .ac-airport{color:var(--text-muted);font-size:.68rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+        .autocomplete-item .ac-country{font-size:.62rem;color:var(--text-muted);background:var(--bg);padding:1px 5px;border-radius:3px}
+
+        /* Fare section */
+        .fare-grid{display:grid;grid-template-columns:1fr 1fr auto;gap:16px;align-items:end;margin-bottom:16px}
+        .fare-total{background:var(--primary);border:1px solid var(--primary);border-radius:10px;padding:15px 20px;display:flex;align-items:center;justify-content:space-between}
+        .fare-total .label{font-size:.82rem;font-weight:700;color:rgba(255,255,255,.78)}
+        .fare-total .value{font-size:1.25rem;font-weight:800;color:#fff}
+
+        .upload-actions{display:flex;align-items:center;gap:12px;margin-top:12px}
+        .upload-status{margin-top:12px;font-size:.75rem;color:var(--text-muted);background:var(--surface-alt);border:1px dashed var(--border);padding:10px 12px;border-radius:8px;min-height:18px}
+
+        /* Submit */
+        .submit-section{text-align:center;padding-top:8px;display:flex;justify-content:center;gap:12px;flex-wrap:wrap}
+        .btn-generate{background:var(--accent);color:#fff;border:none;padding:14px 46px;font-size:.96rem;font-weight:800;letter-spacing:.6px;border-radius:10px;cursor:pointer;transition:all .2s;box-shadow:0 12px 28px rgba(14,148,136,.28);font-family:'Inter',sans-serif;position:relative;overflow:hidden}
+        .btn-generate:hover{transform:translateY(-1px);background:#0b7f75;box-shadow:0 16px 34px rgba(14,148,136,.32)}
+        .btn-generate:active{transform:translateY(0)}
+        .btn-whatsapp{background:#128c7e;box-shadow:0 12px 28px rgba(18,140,126,.24)}
+        .btn-whatsapp:hover{background:#0f766b;box-shadow:0 16px 34px rgba(18,140,126,.3)}
+
+        .footer{text-align:center;padding:24px;color:var(--text-muted);font-size:.72rem;letter-spacing:.35px}
+        .toast{position:fixed;bottom:30px;right:30px;background:var(--primary);color:#fff;padding:14px 24px;border-radius:10px;font-size:.85rem;font-weight:600;box-shadow:0 14px 34px rgba(15,39,66,.26);transform:translateY(100px);opacity:0;transition:all .4s cubic-bezier(.16,1,.3,1);z-index:1000}
+        .toast.show{transform:translateY(0);opacity:1}
+        .spinner{display:inline-block;width:18px;height:18px;border:2.5px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite;margin-right:8px;vertical-align:middle}
+        @keyframes spin{to{transform:rotate(360deg)}}
+
+        @media(max-width:768px){
+            .form-grid,.form-grid.three-col,.form-grid.four-col{grid-template-columns:1fr}
+            .container{margin:16px auto;padding:0 12px}
+            .card-body{padding:20px}
+            .header h1{font-size:1.5rem}
+            .header-inner{align-items:flex-start;flex-direction:column;padding:0 16px}
+            .header .db-badge{white-space:normal}
+            .fare-total{align-items:flex-start;flex-direction:column;gap:6px}
+        }
+
+        ::-webkit-scrollbar{width:6px}
+        ::-webkit-scrollbar-track{background:transparent}
+        ::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+        .advanced-hidden{display:none}
+        .simple-card input:focus{box-shadow:0 6px 20px rgba(15,39,66,.06);border-color:var(--accent)}
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="header-inner">
+            <div class="brand-copy">
+                <div class="brand-mark">BT</div>
+                <div>
+                    <h1>BHARAT HORIZON TRAVELS</h1>
+                    <p>Professional E-Ticket Generator</p>
+                </div>
+            </div>
+            <div class="db-badge">8,800+ Airports / 100+ Airlines / Multi-Segment</div>
+        </div>
+    </div>
+
+    <div class="container">
+        <form id="ticketForm" action="/generate" method="POST" enctype="multipart/form-data">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+            <!-- Simple Google-like UI -->
+            <div class="card simple-card" style="text-align:center;padding:36px 24px;margin-bottom:18px">
+                <h2 style="margin-bottom:10px;color:var(--primary);font-size:1.05rem;letter-spacing:0.6px">Quick Ticket — Search or Paste PNR</h2>
+                <div style="max-width:720px;margin:12px auto;display:flex;gap:10px;align-items:center;justify-content:center">
+                    <input id="simplePnr" type="text" placeholder="Enter PNR or Booking Ref (e.g. ABC123)" style="flex:1;padding:14px 18px;border-radius:32px;border:1px solid var(--border);font-size:1rem;box-shadow:none;outline:none">
+                    <button type="button" id="simpleGenerate" class="btn-generate" style="padding:12px 20px;border-radius:28px;">Generate</button>
+                </div>
+                <div style="margin-top:10px;color:var(--text-muted);font-size:0.86rem">
+                    Or use the Upload PDF in Advanced mode to auto-extract fields.
+                </div>
+                <div style="margin-top:12px;">
+                    <button type="button" id="toggleAdvanced" style="background:none;border:none;color:var(--primary);font-weight:700;cursor:pointer">Show Advanced Options ▾</button>
+                </div>
+            </div>
+
+            <!-- Advanced (original) form — hidden by default -->
+            <div id="advancedSection" class="advanced-hidden">
+
+            <!-- ═══ PDF extraction temporarily disabled ═══ -->
+            <div class="card">
+                <div class="card-header">
+                    <div class="icon">UP</div>
+                    <h2>PDF Extraction Disabled</h2>
+                </div>
+                <div class="card-body">
+                            <div class="upload-status" id="uploadStatus" style="padding:12px 14px; color:var(--text);">
+                                Upload a digital PDF e-ticket to auto-extract fields (scanned images may not work).
+                            </div>
+                            <div class="upload-actions" style="margin-top:14px;align-items:center;gap:12px;">
+                                <input type="file" id="ticketUpload" name="ticket_pdf" accept="application/pdf" style="padding:8px;">
+                                <button type="button" class="btn-generate" id="extractBtn" style="background:#0f2742;">Upload &amp; Parse PDF</button>
+                                <button type="button" class="btn-generate" id="sampleFillBtn" style="background:#666; box-shadow:0 12px 28px rgba(102,102,102,.2);">Fill Sample Ticket</button>
+                            </div>
+                </div>
+            </div>
+
+            <!-- ═══ Booking Info ═══ -->
+            <div class="card">
+                <div class="card-header">
+                    <div class="icon">BK</div>
+                    <h2>Booking Information</h2>
+                </div>
+                <div class="card-body">
+                    <div class="section-title"><span class="dot"></span>AGENCY &amp; CONTACT</div>
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label>Agency Phone</label>
+                            <input type="text" name="agency_phone" placeholder="e.g. +91 7759069422" value="+91 7759069422">
+                        </div>
+                        <div class="form-group">
+                            <label>Agency Email</label>
+                            <input type="email" name="agency_email" placeholder="e.g. ankitrajvm@gmail.com" value="ankitrajvm@gmail.com">
+                        </div>
+                    </div>
+                    
+                    <div class="separator"></div>
+                    <div class="section-title"><span class="dot"></span>BOOKING DETAILS</div>
+                    <div class="form-grid three-col">
+                        <div class="form-group">
+                            <label>Booking Platform <span class="req">*</span></label>
+                            <input type="text" name="booking_platform" placeholder="e.g. MakeMyTrip, Cleartrip" list="platforms" required>
+                            <datalist id="platforms">
+                                <option value="MakeMyTrip">
+                                <option value="Cleartrip">
+                                <option value="Goibibo">
+                                <option value="Direct/Walk-in">
+                                <option value="B2B Portal">
+                            </datalist>
+                        </div>
+                        <div class="form-group">
+                            <label>Booking ID <span class="req">*</span></label>
+                            <input type="text" name="booking_id" id="bookingIdInput" placeholder="Fetching..." style="text-transform:uppercase">
+                        </div>
+                        <div class="form-group">
+                            <label>PNR / Booking Ref <span class="req">*</span></label>
+                            <input type="text" name="pnr" placeholder="e.g. ABC123" required style="text-transform:uppercase; font-weight: bold; letter-spacing: 1px;">
+                        </div>
+                        <div class="form-group" style="display: flex; align-items: center; gap: 10px; margin-top: 25px;">
+                            <input type="checkbox" name="is_dummy" id="is_dummy" value="true" style="width: auto; height: 18px;">
+                            <label for="is_dummy" style="margin: 0; cursor: pointer;">Dummy Ticket (Do not save to Excel)</label>
+                        </div>
+                        <div class="form-group">
+                            <label>Booking Date</label>
+                            <input type="date" name="booking_date" id="booking_date">
+                        </div>
+                        <div class="form-group">
+                            <label>Refund Status</label>
+                            <select name="refund_status">
+                                <option value="Refundable">Refundable</option>
+                                <option value="Non-Refundable">Non-Refundable</option>
+                                <option value="Partially Refundable">Partially Refundable</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Fare Type</label>
+                            <select name="fare_type">
+                                <option value="REGULAR">REGULAR</option>
+                                <option value="STUDENT FARE">STUDENT FARE</option>
+                                <option value="SPECIAL FARE">SPECIAL FARE</option>
+                                <option value="RETAIL FARE">RETAIL FARE</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ═══ Flight Segments ═══ -->
+            <div class="card">
+                <div class="card-header">
+                    <div class="icon">FL</div>
+                    <h2>Flight Details</h2>
+                </div>
+                <div class="card-body">
+                    <input type="hidden" name="flight_count" id="flightCount" value="1">
+                    <div id="flightsContainer"></div>
+
+                    <button type="button" class="btn-add-flight" id="addFlightBtn" onclick="addFlight()">
+                        Add Connecting Flight / Layover
+                    </button>
+                </div>
+            </div>
+
+            <!-- ═══ Passenger Details ═══ -->
+            <div class="card">
+                <div class="card-header">
+                    <div class="icon">PX</div>
+                    <h2>Passenger Details</h2>
+                </div>
+                <div class="card-body">
+                    <div class="section-title"><span class="dot"></span>CUSTOMER CONTACT (BOOKING)</div>
+                    <div class="form-grid" style="margin-bottom: 24px;">
+                        <div class="form-group">
+                            <label>Customer Phone <span class="req">*</span></label>
+                            <input type="text" name="customer_phone" placeholder="e.g. +91 9876543210" required>
+                        </div>
+                        <div class="form-group">
+                            <label>Customer Email <span class="req">*</span></label>
+                            <input type="email" name="customer_email" placeholder="e.g. user@example.com" required>
+                        </div>
+                    </div>
+                    <div class="separator"></div>
+
+                    <input type="hidden" name="pax_count" id="paxCount" value="1">
+                    <div id="paxContainer"></div>
+
+                    <button type="button" class="btn-add-pax" onclick="addPassenger()">
+                        Add Passenger
+                    </button>
+                </div>
+            </div>
+
+            <!-- ═══ Fare Details ═══ -->
+            <div class="card">
+                <div class="card-header">
+                    <div class="icon">INR</div>
+                    <h2>Fare Details</h2>
+                </div>
+                <div class="card-body">
+                    <div class="section-title"><span class="dot"></span>FARE BREAKDOWN</div>
+                    <div class="fare-grid" style="grid-template-columns: 1fr 1fr; margin-bottom: 16px;">
+                        <div class="form-group">
+                            <label>Base Fare (INR) <span class="req">*</span></label>
+                            <input type="number" step="0.01" name="base_fare" id="baseFare" placeholder="e.g. 3500" required oninput="calcTotal()">
+                        </div>
+                        <div class="form-group">
+                            <label>Airline Taxes & Fees (INR) <span class="req">*</span></label>
+                            <input type="number" step="0.01" name="taxes_fees" id="taxesFees" placeholder="e.g. 850" required oninput="calcTotal()">
+                        </div>
+                        <div class="form-group">
+                            <label>Insurance (INR)</label>
+                            <input type="number" step="0.01" name="insurance" id="insurance" value="0" oninput="calcTotal()">
+                        </div>
+                        <div class="form-group">
+                            <label>Meals (INR)</label>
+                            <input type="number" step="0.01" name="meals_fee" id="mealsFee" value="0" oninput="calcTotal()">
+                        </div>
+                        <div class="form-group">
+                            <label>Baggage (INR)</label>
+                            <input type="number" step="0.01" name="baggage_fee" id="baggageFee" value="0" oninput="calcTotal()">
+                        </div>
+                        <div class="form-group">
+                            <label>Seats (INR)</label>
+                            <input type="number" step="0.01" name="seats_fee" id="seatsFee" value="0" oninput="calcTotal()">
+                        </div>
+                        <div class="form-group">
+                            <label>Zero Cancel (INR)</label>
+                            <input type="number" step="0.01" name="zero_cancel" id="zeroCancel" value="0" oninput="calcTotal()">
+                        </div>
+                        <div class="form-group">
+                            <label>Discount (INR)</label>
+                            <input type="number" step="0.01" name="discount" id="discount" value="0" oninput="calcTotal()">
+                        </div>
+                        <div class="form-group">
+                            <label>Total Amount (INR)</label>
+                            <input type="text" name="total_fare" id="totalFare" placeholder="Auto-calculated" readonly style="font-weight:700;color:var(--primary);font-size:1rem">
+                        </div>
+                    </div>
+                    
+                    <div class="separator"></div>
+                    <div class="section-title"><span class="dot"></span>PAYMENT METHOD</div>
+                    <div class="form-grid three-col">
+                        <div class="form-group">
+                            <label>Paid Via</label>
+                            <select name="payment_method" id="paymentMethod" onchange="toggleCard()">
+                                <option value="UPI">UPI</option>
+                                <option value="Credit Card">Credit Card</option>
+                                <option value="Debit Card">Debit Card</option>
+                                <option value="Net Banking">Net Banking</option>
+                                <option value="Wallet">Wallet</option>
+                                <option value="Cash">Cash</option>
+                            </select>
+                        </div>
+                        <div class="form-group" id="cardLast4Group" style="display:none;">
+                            <label>Card Last 4 Digits</label>
+                            <input type="text" name="card_last_4" placeholder="e.g. 1234" maxlength="4">
+                        </div>
+                    </div>
+
+                    <div class="fare-total" style="margin-top: 16px;">
+                        <span class="label">Total Payable Amount</span>
+                        <span class="value" id="fareTotalDisplay">INR 0</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Submit -->
+            <div class="submit-section">
+                <input type="hidden" name="delivery_action" id="deliveryAction" value="download">
+                <button type="submit" class="btn-generate" id="submitBtn">
+                    Generate E-Ticket PDF
+                </button>
+                <button type="submit" class="btn-generate btn-whatsapp" id="whatsappBtn" onclick="document.getElementById('deliveryAction').value='whatsapp'">
+                    Generate & Send WhatsApp
+                </button>
+            </div>
+        </form>
+    </div>
+
+    <div class="footer">2026 Bharat Horizon Travels · Professional E-Ticket Generator · Data sourced from IATA Database</div>
+    <div class="toast" id="toast"></div>
+
+<script>
+// ─── Globals ──────────────────────────────────────────────
+let AIRLINES = {};
+let flightIdx = 0;
+let paxIdx = 0;
+
+fetch('/api/airlines').then(r=>r.json()).then(d=>{AIRLINES=d});
+
+function showToast(msg,dur=3000){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),dur)}
+
+// ─── Fare calculation ─────────────────────────────────────
+function calcTotal(){
+    const base=parseFloat(document.getElementById('baseFare').value)||0;
+    const tax=parseFloat(document.getElementById('taxesFees').value)||0;
+    const ins=parseFloat(document.getElementById('insurance').value)||0;
+    const meals=parseFloat(document.getElementById('mealsFee').value)||0;
+    const bag=parseFloat(document.getElementById('baggageFee').value)||0;
+    const seat=parseFloat(document.getElementById('seatsFee').value)||0;
+    const zc=parseFloat(document.getElementById('zeroCancel').value)||0;
+    const disc=parseFloat(document.getElementById('discount').value)||0;
+    const total=base+tax+ins+meals+bag+seat+zc-disc;
+    document.getElementById('totalFare').value=total;
+    document.getElementById('fareTotalDisplay').textContent='INR '+total.toLocaleString('en-IN');
+}
+
+function toggleCard() {
+    const pm = document.getElementById('paymentMethod').value;
+    const group = document.getElementById('cardLast4Group');
+    if(pm === 'Credit Card' || pm === 'Debit Card') {
+        group.style.display = 'block';
+    } else {
+        group.style.display = 'none';
+        group.querySelector('input').value = '';
+    }
+}
+
+// ─── Time helpers ─────────────────────────────────────────
+function formatTime12(t){if(!t)return'';const[h,m]=t.split(':').map(Number);return(h%12||12)+':'+String(m).padStart(2,'0')+(h>=12?' PM':' AM')}
+function calcDur(depId,arrId,durId){
+    const d=document.getElementById(depId).value,a=document.getElementById(arrId).value;
+    if(d&&a){const[dh,dm]=d.split(':').map(Number),[ah,am]=a.split(':').map(Number);let td=dh*60+dm,ta=ah*60+am;if(ta<td)ta+=1440;const diff=ta-td;document.getElementById(durId).value=Math.floor(diff/60)+'h '+diff%60+'m';}
+}
+
+// ─── Airport autocomplete ─────────────────────────────────
+let searchTimer=null;
+function setupAC(inputId,listId,helperId,cityId){
+    const input=document.getElementById(inputId),list=document.getElementById(listId),
+          helper=document.getElementById(helperId),cityInput=document.getElementById(cityId);
+    if(!input)return;
+    input.addEventListener('input',function(){
+        const v=this.value.trim();this.value=v.toUpperCase();
+        if(!v){list.classList.remove('visible');list.innerHTML='';helper.textContent='';cityInput.value='';return}
+        clearTimeout(searchTimer);
+        searchTimer=setTimeout(async()=>{
+            const res=await fetch('/api/search-airports?q='+encodeURIComponent(v.toUpperCase()));
+            const data=await res.json();list.innerHTML='';
+            if(data.length){
+                data.forEach(item=>{
+                    const div=document.createElement('div');div.className='autocomplete-item';
+                    div.innerHTML=`<span class="ac-code">${item.code}</span><div class="ac-info"><div class="ac-city">${item.city}</div><div class="ac-airport">${item.airport}</div></div><span class="ac-country">${item.country}</span>`;
+                    div.onclick=()=>{input.value=item.code;cityInput.value=item.city;helper.textContent='✓ '+item.airport;helper.className='helper detected';list.classList.remove('visible')};
+                    list.appendChild(div);
+                });
+                if(v.length===3){const ex=data.find(r=>r.code===v.toUpperCase());if(ex){cityInput.value=ex.city;helper.textContent='✓ '+ex.airport;helper.className='helper detected';list.classList.remove('visible');return}}
+                list.classList.add('visible');
+            } else {list.classList.remove('visible');if(v.length>=3){helper.textContent='Not found — enter city manually';helper.className='helper';cityInput.readOnly=false}}
+        },150);
+    });
+    document.addEventListener('click',e=>{if(!input.contains(e.target)&&!list.contains(e.target))list.classList.remove('visible')});
+}
+
+// ─── Add Flight Segment ───────────────────────────────────
+function addFlight(){
+    const i=flightIdx++;
+    const container=document.getElementById('flightsContainer');
+
+    if(i>0){
+        const layover=document.createElement('div');
+        layover.className='layover-indicator';layover.id='layover_'+i;
+        layover.innerHTML=`
+            <span class="layover-line"></span>
+            <div style="display:flex; align-items:center; gap:10px;">
+                <span>LAYOVER:</span>
+                <input type="text" name="flight_${i}_layover" placeholder="e.g. 2h 30m (Short layover)" style="padding:4px 8px; font-size:0.75rem; border:1px solid var(--border); border-radius:6px; width: 220px; background:var(--surface);">
+                <span style="font-size:0.65rem; color:var(--text-muted);">(Leave empty to auto-calculate)</span>
+            </div>
+            <span class="layover-line"></span>
+        `;
+        container.appendChild(layover);
+    }
+
+    const seg=document.createElement('div');
+    seg.className='flight-segment';seg.id='flight_seg_'+i;
+    seg.innerHTML=`
+        <span class="seg-label">FLIGHT ${i+1}</span>
+        ${i>0?'<button type="button" class="remove-flight" onclick="removeFlight('+i+')" title="Remove">✕</button>':''}
+
+        <div class="form-grid" style="margin-top:10px; grid-template-columns: 1fr 1fr 1fr;">
+            <div class="form-group">
+                <label>Flight Number <span class="req">*</span></label>
+                <input type="text" name="flight_${i}_flight_no" id="fno_${i}" placeholder="e.g. 6E 2341" required autocomplete="off" oninput="detectAirline(this,${i})">
+                <div class="helper" id="al_detect_${i}"></div>
+            </div>
+            <div class="form-group">
+                <label>Airline</label>
+                <input type="text" name="flight_${i}_airline" id="al_${i}" placeholder="Auto-detected">
+            </div>
+            <div class="form-group">
+                <label>Segment PNR <span style="font-size: 0.7rem; color: var(--text-muted);">(Optional)</span></label>
+                <input type="text" name="flight_${i}_segment_pnr" id="pnr_${i}" placeholder="If different from main PNR" autocomplete="off">
+                <div class="helper" style="font-size: 0.65rem; color: var(--text-muted);">For connecting flights with separate PNRs</div>
+            </div>
+        </div>
+
+        <div class="form-grid">
+            <div class="form-group autocomplete-wrapper">
+                <label>From — Code <span class="req">*</span></label>
+                <input type="text" name="flight_${i}_from_code" id="fc_${i}" placeholder="e.g. DEL" required autocomplete="off">
+                <div class="autocomplete-list" id="fc_list_${i}"></div>
+                <div class="helper" id="fc_h_${i}"></div>
+            </div>
+            <div class="form-group">
+                <label>From — City</label>
+                <input type="text" name="flight_${i}_from_city" id="fcity_${i}" placeholder="Auto-filled">
+            </div>
+            <div class="form-group autocomplete-wrapper">
+                <label>To — Code <span class="req">*</span></label>
+                <input type="text" name="flight_${i}_to_code" id="tc_${i}" placeholder="e.g. BOM" required autocomplete="off">
+                <div class="autocomplete-list" id="tc_list_${i}"></div>
+                <div class="helper" id="tc_h_${i}"></div>
+            </div>
+            <div class="form-group">
+                <label>To — City</label>
+                <input type="text" name="flight_${i}_to_city" id="tcity_${i}" placeholder="Auto-filled">
+            </div>
+        </div>
+
+        <div class="form-grid four-col">
+            <div class="form-group">
+                <label>Travel Date <span class="req">*</span></label>
+                <input type="date" name="flight_${i}_date" id="fdate_${i}" required>
+            </div>
+            <div class="form-group">
+                <label>Departure <span class="req">*</span></label>
+                <input type="time" name="flight_${i}_dep_time_raw" id="fdep_${i}" required onchange="calcDur('fdep_${i}','farr_${i}','fdur_${i}')">
+            </div>
+            <div class="form-group">
+                <label>Arrival <span class="req">*</span></label>
+                <input type="time" name="flight_${i}_arr_time_raw" id="farr_${i}" required onchange="calcDur('fdep_${i}','farr_${i}','fdur_${i}')">
+            </div>
+            <div class="form-group">
+                <label>Duration</label>
+                <input type="text" name="flight_${i}_duration" id="fdur_${i}" placeholder="Auto" readonly>
+            </div>
+        </div>
+
+        <div class="form-grid" style="margin-bottom:0; display: flex; align-items: flex-end; gap: 20px;">
+            <div class="form-group" style="flex:1;">
+                <label>Class</label>
+                <select name="flight_${i}_class">
+                    <option value="Economy">Economy</option>
+                    <option value="Premium Economy">Premium Economy</option>
+                    <option value="Business">Business</option>
+                    <option value="First Class">First Class</option>
+                </select>
+            </div>
+            <div class="form-group" style="flex:1; padding-bottom: 2px;">
+                <label>Barcode Image</label>
+                <input type="file" name="flight_${i}_barcode" accept="image/*" style="padding: 6px 10px; font-size: 0.7rem;">
+            </div>
+        </div>
+
+        <div class="section-title" style="margin-top:12px; margin-bottom:8px;"><span class="dot"></span>SEAT, MEAL & BAGGAGE FOR THIS FLIGHT</div>
+        <div class="form-grid four-col" style="margin-bottom:0;">
+            <div class="form-group">
+                <label>Seat</label>
+                <input type="text" name="flight_${i}_seat" placeholder="e.g. 12A" value="Not selected">
+            </div>
+            <div class="form-group">
+                <label>Meal</label>
+                <select name="flight_${i}_meal">
+                    <option value="Not selected" selected>Not selected</option>
+                    <option value="Veg Meal">Veg Meal</option>
+                    <option value="Non-Veg Meal">Non-Veg Meal</option>
+                    <option value="Jain Meal">Jain Meal</option>
+                    <option value="Special Meal">Special Meal</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Check-in Baggage</label>
+                <select name="flight_${i}_checkin_bag">
+                    <option value="" selected>Airline Default</option>
+                    <option value="No Baggage">No Baggage</option>
+                    <option value="15 KG (1 Piece)">15 KG (1 Piece)</option>
+                    <option value="15 KG (2 Pieces)">15 KG (2 Pieces)</option>
+                    <option value="20 KG (1 Piece)">20 KG (1 Piece)</option>
+                    <option value="25 KG (1 Piece)">25 KG (1 Piece)</option>
+                    <option value="30 KG (1 Piece)">30 KG (1 Piece)</option>
+                    <option value="30 KG (2 Pieces)">30 KG (2 Pieces)</option>
+                    <option value="40 KG (2 Pieces)">40 KG (2 Pieces)</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Hand Baggage</label>
+                <select name="flight_${i}_hand_bag">
+                    <option value="" selected>Airline Default</option>
+                    <option value="No Baggage">No Baggage</option>
+                    <option value="7 KG (1 Piece)">7 KG (1 Piece)</option>
+                    <option value="10 KG (1 Piece)">10 KG (1 Piece)</option>
+                </select>
+            </div>
+        </div>
+
+        <!-- Hidden fields for formatted times -->
+        <input type="hidden" name="flight_${i}_dep_time" id="fdep_fmt_${i}">
+        <input type="hidden" name="flight_${i}_arr_time" id="farr_fmt_${i}">
+    `;
+    container.appendChild(seg);
+
+    // Set today's date
+    document.getElementById('fdate_'+i).value=new Date().toISOString().split('T')[0];
+
+    // Setup autocomplete
+    setupAC('fc_'+i,'fc_list_'+i,'fc_h_'+i,'fcity_'+i);
+    setupAC('tc_'+i,'tc_list_'+i,'tc_h_'+i,'tcity_'+i);
+
+    // Attach listeners so changes to flight-level seat/meal/baggage propagate to passengers
+    setTimeout(()=>{
+        const seatInput = document.querySelector(`#flight_seg_${i} [name="flight_${i}_seat"]`);
+        const mealSelect = document.querySelector(`#flight_seg_${i} [name="flight_${i}_meal"]`);
+        const checkinSelect = document.querySelector(`#flight_seg_${i} [name="flight_${i}_checkin_bag"]`);
+        const handSelect = document.querySelector(`#flight_seg_${i} [name="flight_${i}_hand_bag"]`);
+        if(seatInput) seatInput.addEventListener('input', updatePassengerSegmentFields);
+        if(mealSelect) mealSelect.addEventListener('change', updatePassengerSegmentFields);
+        if(checkinSelect) checkinSelect.addEventListener('change', updatePassengerSegmentFields);
+        if(handSelect) handSelect.addEventListener('change', updatePassengerSegmentFields);
+        // Initial sync
+        updatePassengerSegmentFields();
+    }, 0);
+
+    document.getElementById('flightCount').value=flightIdx;
+}
+
+// Propagate flight-level seat/meal/baggage values into passenger segment fields
+function updatePassengerSegmentFields(){
+    const flightCount = flightIdx;
+    document.querySelectorAll('.pax-row').forEach((row, paxIndex)=>{
+        const segmentsContainer = row.querySelector('.pax-segments');
+        if(!segmentsContainer) return;
+        segmentsContainer.innerHTML = '';
+        for(let fi=0; fi<flightCount; fi++){
+            const flightSeatEl = document.querySelector(`[name="flight_${fi}_seat"]`);
+            const flightMealEl = document.querySelector(`[name="flight_${fi}_meal"]`);
+            const flightCheckinEl = document.querySelector(`[name="flight_${fi}_checkin_bag"]`);
+            const flightHandEl = document.querySelector(`[name="flight_${fi}_hand_bag"]`);
+
+            const flightSeat = flightSeatEl?flightSeatEl.value.trim():'';
+            const flightMeal = flightMealEl?flightMealEl.value:'Not selected';
+            const flightCheckin = flightCheckinEl?flightCheckinEl.value:'';
+            const flightHand = flightHandEl?flightHandEl.value:'';
+
+            const segDiv = document.createElement('div');
+            segDiv.style.display='grid';
+            segDiv.style.gridTemplateColumns='1fr 1fr 1fr 1fr';
+            segDiv.style.gap='10px';
+            segDiv.style.alignItems='end';
+            segDiv.innerHTML = `
+                <div class="form-group">
+                    <label>Flight ${fi+1} Seat</label>
+                    <input type="text" name="pax_${paxIndex}_seat_${fi}" placeholder="e.g. 12A">
+                </div>
+                <div class="form-group">
+                    <label>Meal</label>
+                    <select name="pax_${paxIndex}_meal_${fi}">
+                        <option value="Not selected">Not selected</option>
+                        <option value="Veg Meal">Veg Meal</option>
+                        <option value="Non-Veg Meal">Non-Veg Meal</option>
+                        <option value="Jain Meal">Jain Meal</option>
+                        <option value="Special Meal">Special Meal</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Check-in Bag</label>
+                    <select name="pax_${paxIndex}_checkin_bag_${fi}">
+                        <option value="">Airline Default</option>
+                        <option value="No Baggage">No Baggage</option>
+                        <option value="15 KG (1 Piece)">15 KG (1 Piece)</option>
+                        <option value="20 KG (1 Piece)">20 KG (1 Piece)</option>
+                        <option value="30 KG (1 Piece)">30 KG (1 Piece)</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Hand Bag</label>
+                    <select name="pax_${paxIndex}_hand_bag_${fi}">
+                        <option value="">Airline Default</option>
+                        <option value="No Baggage">No Baggage</option>
+                        <option value="7 KG (1 Piece)">7 KG (1 Piece)</option>
+                        <option value="10 KG (1 Piece)">10 KG (1 Piece)</option>
+                    </select>
+                </div>
+            `;
+
+            // Append and then set defaults / disabled state if flight-level value exists
+            segmentsContainer.appendChild(segDiv);
+            const paxSeatInput = segmentsContainer.querySelector(`[name="pax_${paxIndex}_seat_${fi}"]`);
+            const paxMealSelect = segmentsContainer.querySelector(`[name="pax_${paxIndex}_meal_${fi}"]`);
+            const paxCheckinSelect = segmentsContainer.querySelector(`[name="pax_${paxIndex}_checkin_bag_${fi}"]`);
+            const paxHandSelect = segmentsContainer.querySelector(`[name="pax_${paxIndex}_hand_bag_${fi}"]`);
+
+            // If passenger provided a specific per-segment value (from previous fill), preserve it
+            const existingSeat = document.querySelector(`[name="pax_${paxIndex}_seat_${fi}"]`);
+            if(existingSeat && existingSeat.dataset && existingSeat.dataset.preset){
+                // already preset
+            }
+
+            if(flightSeat && flightSeat.toLowerCase()!=='not selected'){
+                paxSeatInput.value = flightSeat;
+                paxSeatInput.disabled = true;
+                paxSeatInput.style.opacity = 0.8;
+            } else {
+                // leave editable and blank unless passenger-level single seat exists
+                const singlePaxSeat = document.querySelector(`[name="pax_${paxIndex}_seat"]`);
+                if(singlePaxSeat && singlePaxSeat.value && singlePaxSeat.value!=='Not selected'){
+                    paxSeatInput.value = singlePaxSeat.value;
+                }
+                paxSeatInput.disabled = false;
+            }
+
+            if(flightMeal && flightMeal!=='Not selected'){
+                paxMealSelect.value = flightMeal;
+                paxMealSelect.disabled = true;
+            }
+            if(flightCheckin){ paxCheckinSelect.value = flightCheckin; paxCheckinSelect.disabled = true; }
+            if(flightHand){ paxHandSelect.value = flightHand; paxHandSelect.disabled = true; }
+        }
+    });
+}
+
+function removeFlight(idx){
+    const seg=document.getElementById('flight_seg_'+idx);
+    const layover=document.getElementById('layover_'+idx);
+    if(seg)seg.remove();
+    if(layover)layover.remove();
+    // Recount
+    flightIdx--;
+    document.getElementById('flightCount').value=flightIdx;
+    // Re-label remaining
+    document.querySelectorAll('.flight-segment').forEach((s,i)=>{
+        s.querySelector('.seg-label').textContent='FLIGHT '+(i+1);
+    });
+}
+
+function detectAirline(input,idx){
+    const v=input.value.trim().toUpperCase();input.value=v;
+    const compact=v.replace(/[^A-Z0-9]/g,'');
+    const candidates=[compact.slice(0,3),compact.slice(0,2)].filter(Boolean);
+    const prefix=candidates.find(code=>AIRLINES[code]);
+    const helper=document.getElementById('al_detect_'+idx);
+    const alInput=document.getElementById('al_'+idx);
+    if(prefix){
+        const info=typeof AIRLINES[prefix]==='string'?{name:AIRLINES[prefix],iata:prefix}:AIRLINES[prefix];
+        alInput.value=info.name;
+        const codeLabel=info.iata&&info.iata!==prefix?`${prefix} / ${info.iata}`:prefix;
+        helper.innerHTML=`<span class="airline-match">${info.logo?`<img class="airline-logo" src="${info.logo}" alt="${info.name} logo" onerror="this.style.display='none'">`:''}<span>✓ ${info.name} (${codeLabel})</span></span>`;
+        helper.className='helper detected';
+    }
+    else{helper.textContent='';helper.className='helper'}
+}
+
+// ─── Add Passenger ────────────────────────────────────────
+function addPassenger(){
+    const i=paxIdx++;
+    const container=document.getElementById('paxContainer');
+    const row=document.createElement('div');
+    row.className='pax-row';row.id='pax_row_'+i;
+    row.innerHTML=`
+        <span class="pax-label">PASSENGER ${i+1}</span>
+        ${i>0?'<button type="button" class="remove-pax" onclick="removePassenger('+i+')" title="Remove">✕</button>':''}
+
+        <div class="form-grid" style="margin-top:8px">
+            <div class="form-group">
+                <label>Passenger Name <span class="req">*</span></label>
+                <input type="text" name="pax_${i}_name" placeholder="As on ID proof" required>
+            </div>
+            <div class="form-group">
+                <label>Ticket Number</label>
+                <input type="text" name="pax_${i}_ticket_no" placeholder="Auto-generated if empty">
+            </div>
+        </div>
+
+        <div class="section-title" style="margin-top:12px; margin-bottom:8px;"><span class="dot"></span>INTERNATIONAL / TRAVEL DOCS</div>
+        <div class="form-grid three-col">
+            <div class="form-group">
+                <label>Passport Number</label>
+                <input type="text" name="pax_${i}_passport" placeholder="e.g. V2288007">
+            </div>
+            <div class="form-group">
+                <label>Date of Birth (DOB)</label>
+                <input type="text" name="pax_${i}_dob" placeholder="e.g. 01 Jan 2000">
+            </div>
+            <div class="form-group">
+                <label>Date of Expiry (DOE)</label>
+                <input type="text" name="pax_${i}_doe" placeholder="e.g. 17 Aug 2031">
+            </div>
+        </div>
+
+        <div class="section-title" style="margin-top:12px; margin-bottom:8px;"><span class="dot"></span>SEAT, MEAL & BAGGAGE</div>
+        <div class="form-grid four-col">
+            <div class="form-group" style="grid-column:1/-1">
+                <div id="pax_${i}_segments_container" class="pax-segments" style="display:flex;flex-direction:column;gap:8px"></div>
+            </div>
+        </div>
+    `;
+    container.appendChild(row);
+    document.getElementById('paxCount').value=paxIdx;
+    // Ensure per-segment fields are updated for this new passenger
+    updatePassengerSegmentFields();
+}
+
+function removePassenger(idx){
+    const row=document.getElementById('pax_row_'+idx);
+    if(row)row.remove();
+    paxIdx--;
+    document.getElementById('paxCount').value=paxIdx;
+    document.querySelectorAll('.pax-row').forEach((r,i)=>{r.querySelector('.pax-label').textContent='PASSENGER '+(i+1)});
+}
+
+// ─── Ticket upload auto-fill ──────────────────────────────
+function setInputValue(name,value){const el=document.querySelector(`[name="${name}"]`);if(el&&value){el.value=value;return true;}return false;}
+
+function resetFlights(count){
+    const container=document.getElementById('flightsContainer');
+    container.innerHTML='';
+    flightIdx=0;
+    document.getElementById('flightCount').value=0;
+    for(let i=0;i<count;i++)addFlight();
+    // After flights recreated, sync passenger segment inputs
+    updatePassengerSegmentFields();
+}
+
+function resetPassengers(count){
+    const container=document.getElementById('paxContainer');
+    container.innerHTML='';
+    paxIdx=0;
+    document.getElementById('paxCount').value=0;
+    for(let i=0;i<count;i++)addPassenger();
+    // Ensure passenger segment inputs reflect current flights
+    updatePassengerSegmentFields();
+}
+
+function applyExtractedData(data){
+    if(!data)return'No data extracted.';
+    if(data.booking_platform)setInputValue('booking_platform',data.booking_platform);
+    if(data.booking_id)document.getElementById('bookingIdInput').value=data.booking_id;
+    if(data.pnr)setInputValue('pnr',data.pnr);
+    if(data.booking_date)document.getElementById('booking_date').value=data.booking_date;
+    if(data.customer_email)setInputValue('customer_email',data.customer_email);
+    if(data.customer_phone)setInputValue('customer_phone',data.customer_phone);
+
+    const base=parseFloat(data.base_fare||'');
+    const taxes=parseFloat(data.taxes_fees||'');
+    const total=parseFloat(data.total_fare||'');
+    if(!isNaN(base))document.getElementById('baseFare').value=base;
+    if(!isNaN(taxes))document.getElementById('taxesFees').value=taxes;
+    if(isNaN(base)&&isNaN(taxes)&&!isNaN(total)){
+        document.getElementById('baseFare').value=total;
+        document.getElementById('taxesFees').value=0;
+    }
+    if(!isNaN(base)||!isNaN(taxes)||!isNaN(total))calcTotal();
+
+    const flights=Array.isArray(data.flights)?data.flights:[];
+    resetFlights(flights.length||1);
+    flights.forEach((f,i)=>{
+        if(f.flight_no){const fno=document.getElementById('fno_'+i);fno.value=f.flight_no;detectAirline(fno,i);} 
+        if(f.airline)document.getElementById('al_'+i).value=f.airline;
+        if(f.segment_pnr)document.getElementById('pnr_'+i).value=f.segment_pnr;
+        if(f.from_code)document.getElementById('fc_'+i).value=f.from_code;
+        if(f.to_code)document.getElementById('tc_'+i).value=f.to_code;
+        if(f.date)document.getElementById('fdate_'+i).value=f.date;
+        if(f.dep_time_raw)document.getElementById('fdep_'+i).value=f.dep_time_raw;
+        if(f.arr_time_raw)document.getElementById('farr_'+i).value=f.arr_time_raw;
+        if(f.dep_time_raw&&f.arr_time_raw)calcDur('fdep_'+i,'farr_'+i,'fdur_'+i);
+    });
+
+    const pax=Array.isArray(data.passengers)?data.passengers:[];
+    resetPassengers(pax.length||1);
+    pax.forEach((p,i)=>{
+        if(p.name)document.querySelector(`[name="pax_${i}_name"]`).value=p.name;
+        if(p.ticket_no)document.querySelector(`[name="pax_${i}_ticket_no"]`).value=p.ticket_no;
+        if(p.dob)document.querySelector(`[name="pax_${i}_dob"]`).value=p.dob;
+        if(p.passport)document.querySelector(`[name="pax_${i}_passport"]`).value=p.passport;
+    });
+
+    // Ensure per-passenger per-segment fields are created and pre-filled from flight-level data
+    updatePassengerSegmentFields();
+    if(Array.isArray(data.passengers) && data.passengers.length){
+        data.passengers.forEach((p, pi)=>{
+            if(Array.isArray(p.seats)){
+                p.seats.forEach((s, fi)=>{
+                    const el=document.querySelector(`[name="pax_${pi}_seat_${fi}"]`);
+                    if(el && (!el.disabled || el.value==='')) el.value=s;
+                });
+            }
+            if(Array.isArray(p.meals)){
+                p.meals.forEach((m, fi)=>{
+                    const el=document.querySelector(`[name="pax_${pi}_meal_${fi}"]`);
+                    if(el && (!el.disabled || el.value==='')) el.value=m;
+                });
+            }
+        });
+    }
+
+    let status=`Filled ${flights.length||1} flight(s), ${pax.length||1} passenger(s). Review and adjust any missing fields.`;
+    if(data.raw_excerpt)status+=` Text sample: ${data.raw_excerpt.slice(0,220)}...`;
+    return status;
+}
+
+function getSampleTicketData(){
+    return {
+        booking_platform:'MakeMyTrip',
+        booking_id:'MMT2605071001',
+        pnr:'MAIN01',
+        booking_date:new Date().toISOString().split('T')[0],
+        customer_email:'traveler@example.com',
+        customer_phone:'+91 9876543210',
+        base_fare:'6000',
+        taxes_fees:'1200',
+        total_fare:'7200',
+        flights:[
+            {
+                flight_no:'6E 1234',
+                airline:'IndiGo',
+                segment_pnr:'PNR001',
+                from_code:'DEL',
+                from_city:'New Delhi',
+                to_code:'BOM',
+                to_city:'Mumbai',
+                date:new Date().toISOString().split('T')[0],
+                dep_time_raw:'10:00',
+                arr_time_raw:'12:00',
+                seat:'12A',
+                meal:'Veg Meal',
+                checkin_bag:'15 KG (1 Piece)',
+                hand_bag:'7 KG (1 Piece)'
+            },
+            {
+                flight_no:'6E 5678',
+                airline:'IndiGo',
+                segment_pnr:'PNR002',
+                from_code:'BOM',
+                from_city:'Mumbai',
+                to_code:'BLR',
+                to_city:'Bangalore',
+                date:new Date().toISOString().split('T')[0],
+                dep_time_raw:'14:00',
+                arr_time_raw:'16:00',
+                seat:'14C',
+                meal:'Non-Veg Meal',
+                checkin_bag:'20 KG (1 Piece)',
+                hand_bag:'10 KG (1 Piece)'
+            }
+        ],
+        passengers:[
+            {
+                name:'JOHN DOE',
+                ticket_no:'6191234567890',
+                dob:'1990-01-15',
+                passport:'K1234567',
+                seat:'12A',
+                meal:'Veg Meal',
+                checkin_bag:'15 KG (1 Piece)',
+                hand_bag:'7 KG (1 Piece)'
+            }
+        ],
+        raw_excerpt:'Sample ticket data for testing generation with two connecting flights and separate PNRs'
+    };
+}
+
+const extractBtn=document.getElementById('extractBtn');
+if(extractBtn){
+    extractBtn.addEventListener('click',async()=>{
+        const statusEl=document.getElementById('uploadStatus');
+        const fileInput=document.getElementById('ticketUpload');
+        const file=fileInput&&fileInput.files?fileInput.files[0]:null;
+        if(!file){statusEl.textContent='Please select a PDF first.';return;}
+        statusEl.textContent='Extracting ticket details...';
+        const form=new FormData();
+        form.append('ticket_pdf',file);
+        try{
+            const res=await fetch('/api/parse-ticket',{method:'POST',body:form});
+            const data=await res.json();
+            if(!res.ok){
+                console.error('Backend error:',data);
+                const errorMsg=data.error||'Failed to extract ticket.';
+                statusEl.innerHTML=`<span style="color:#c24135;font-weight:600;">${errorMsg}</span>`;
+                return;
+            }
+            statusEl.textContent=applyExtractedData(data);
+            showToast('Ticket parsed. Please review the details.');
+        }catch(err){
+            console.error('Extraction error:',err);
+            statusEl.innerHTML=`<span style="color:#c24135;font-weight:600;">Network or parsing error. Check console for details.</span>`;
+        }
+    });
+}
+
+// ─── Fill sample ticket data ───────────────────────────────
+const sampleFillBtn=document.getElementById('sampleFillBtn');
+if(sampleFillBtn){
+    sampleFillBtn.addEventListener('click',()=>{
+        const statusEl=document.getElementById('uploadStatus');
+        const data=getSampleTicketData();
+        statusEl.textContent=applyExtractedData(data);
+        showToast('Sample ticket loaded. Click Generate to verify PDF output.');
+    });
+}
+
+// ─── Form submit — format times ───────────────────────────
+document.getElementById('ticketForm').addEventListener('submit',function(e){
+    for(let i=0;i<flightIdx;i++){
+        const dep=document.getElementById('fdep_'+i);
+        const arr=document.getElementById('farr_'+i);
+        const depFmt=document.getElementById('fdep_fmt_'+i);
+        const arrFmt=document.getElementById('farr_fmt_'+i);
+        if(dep&&depFmt)depFmt.value=formatTime12(dep.value);
+        if(arr&&arrFmt)arrFmt.value=formatTime12(arr.value);
+    }
+    const btn=e.submitter || document.getElementById('submitBtn');
+    if(btn.id==='submitBtn')document.getElementById('deliveryAction').value='download';
+    const originalText=btn.textContent;
+    btn.innerHTML='<span class="spinner"></span> '+(btn.id==='whatsappBtn'?'Sending...':'Generating...');
+    btn.disabled=true;
+    document.getElementById('submitBtn').disabled=true;
+    document.getElementById('whatsappBtn').disabled=true;
+    showToast(btn.id==='whatsappBtn'?'Generating and sending on WhatsApp...':'Generating your e-ticket...');
+    
+    // Restore the button state after a delay so the user can re-generate without reloading
+    setTimeout(() => {
+        btn.innerHTML=originalText;
+        document.getElementById('submitBtn').disabled=false;
+        document.getElementById('whatsappBtn').disabled=false;
+    }, 3500);
+});
+
+// ─── Init ─────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+    document.getElementById('booking_date').value=new Date().toISOString().split('T')[0];
+    addFlight();     // First flight
+    addPassenger();  // First passenger
+    
+    // Auto-fetch Booking ID
+    fetch('/api/next_booking_id')
+        .then(response => response.json())
+        .then(data => {
+            if(data.booking_id) {
+                document.getElementById('bookingIdInput').value = data.booking_id;
+            }
+        })
+        .catch(err => console.log('Error fetching booking ID:', err));
+});
+
+// ─── Simple UI handlers ──────────────────────────────────
+const toggleBtn = document.getElementById('toggleAdvanced');
+const advSection = document.getElementById('advancedSection');
+if(toggleBtn && advSection){
+    toggleBtn.addEventListener('click', ()=>{
+        const showing = !advSection.classList.toggle('advanced-hidden');
+        toggleBtn.textContent = showing ? 'Hide Advanced Options ▴' : 'Show Advanced Options ▾';
+    });
+}
+
+const simpleGen = document.getElementById('simpleGenerate');
+if(simpleGen){
+    simpleGen.addEventListener('click', ()=>{
+        const val = document.getElementById('simplePnr').value.trim();
+        if(!val){ showToast('Please enter a PNR or booking ref first.'); return; }
+        // copy into existing pnr field (in advanced form)
+        let pnrField = document.querySelector('[name="pnr"]');
+        if(!pnrField){ // create hidden field if missing
+            pnrField = document.createElement('input'); pnrField.type='hidden'; pnrField.name='pnr';
+            document.getElementById('ticketForm').appendChild(pnrField);
+        }
+        pnrField.value = val.toUpperCase();
+        // Submit the form
+        document.getElementById('ticketForm').submit();
+    });
+}
+</script>
+</body>
+</html>

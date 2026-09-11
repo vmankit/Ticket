@@ -43,7 +43,9 @@
         .form-group input:focus,.form-group select:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(14,148,136,.12)}
         .form-group input::placeholder{color:#a5afbf}
         .form-group .helper{font-size:.68rem;color:var(--text-muted);margin-top:3px;min-height:14px}
-        .form-group .helper.detected{color:var(--success);font-weight:500}
+        /* This is the confirmation that auto-detection worked, so it has to be
+           readable rather than fine print. */
+        .form-group .helper.detected{color:var(--success);font-weight:700;font-size:.73rem}
         .airline-match{display:flex;align-items:center;gap:7px;margin-top:4px}
         .airline-logo{width:24px;height:24px;object-fit:contain;border:1px solid var(--border);border-radius:6px;background:#fff;padding:2px}
 
@@ -608,10 +610,11 @@ function addFlight(){
                 <input type="text" name="flight_${i}_flight_no" id="fno_${i}" placeholder="e.g. 6E 2341" required autocomplete="off" oninput="detectAirline(this,${i})">
                 <div class="helper" id="al_detect_${i}"></div>
             </div>
-            <!-- Filled from the flight number; shown only when we cannot detect it. -->
-            <div class="form-group derived" id="al_wrap_${i}" hidden>
-                <label>Airline</label>
-                <input type="text" name="flight_${i}_airline" id="al_${i}" placeholder="Enter airline name">
+            <!-- Stays visible: seeing this fill in is how you know the flight
+                 number was recognised. Editable when it is not. -->
+            <div class="form-group" id="al_wrap_${i}">
+                <label>Airline <span class="auto-tag" id="al_tag_${i}" hidden>Auto</span></label>
+                <input type="text" name="flight_${i}_airline" id="al_${i}" placeholder="From flight number">
             </div>
         </div>
 
@@ -786,19 +789,26 @@ function detectAirline(input,idx){
     const prefix=candidates.find(code=>AIRLINES[code]);
     const helper=document.getElementById('al_detect_'+idx);
     const alInput=document.getElementById('al_'+idx);
-    const alWrap=document.getElementById('al_wrap_'+idx);
+    const alTag=document.getElementById('al_tag_'+idx);
     if(prefix){
         const info=typeof AIRLINES[prefix]==='string'?{name:AIRLINES[prefix],iata:prefix}:AIRLINES[prefix];
         alInput.value=info.name;
+        alInput.classList.add('auto-field');
+        if(alTag)alTag.hidden=false;
         const codeLabel=info.iata&&info.iata!==prefix?`${prefix} / ${info.iata}`:prefix;
         helper.innerHTML=`<span class="airline-match">${info.logo?`<img class="airline-logo" src="${info.logo}" alt="${info.name} logo" onerror="this.style.display='none'">`:''}<span>✓ ${info.name} (${codeLabel})</span></span>`;
         helper.className='helper detected';
-        if(alWrap)alWrap.hidden=true;
     }
     else{
-        helper.textContent=v?'Airline not recognised — enter the name below.':'';
+        // Detection failed, so hand the field back to the user rather than
+        // leaving a stale airline from a previous flight number.
+        if(alInput.classList.contains('auto-field')){
+            alInput.value='';
+            alInput.classList.remove('auto-field');
+        }
+        if(alTag)alTag.hidden=true;
+        helper.textContent=v?'Airline not recognised — type it alongside.':'';
         helper.className='helper';
-        if(alWrap)alWrap.hidden=!v;
     }
 }
 

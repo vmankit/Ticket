@@ -1,5 +1,35 @@
 # 🚀 Installation & Setup Guide
 
+## OCR for scanned tickets
+
+Uploading a **scanned or photographed** ticket needs the `tesseract` OCR
+engine. The Python packages come from `requirements.txt`, but tesseract is a
+system binary and must be installed separately.
+
+| Where | Command |
+|---|---|
+| Ubuntu / Debian / Render (Docker) | `apt-get install -y tesseract-ocr` |
+| macOS | `brew install tesseract` |
+| Windows | Install from [UB Mannheim builds](https://github.com/UB-Mannheim/tesseract/wiki), then add it to `PATH` |
+
+Check whether the running server has it:
+
+```bash
+curl http://localhost:5000/api/health
+# {"ocr": true, ...}
+```
+
+If `ocr` is `false`, digital PDFs still parse normally — only scanned uploads
+fall back to manual entry, with a message saying so.
+
+**Render note:** the native Python runtime cannot install system packages.
+To enable OCR there, deploy with a Dockerfile that installs `tesseract-ocr`
+before `pip install -r requirements.txt`. Without it the app runs fine; only
+scanned-ticket upload is unavailable.
+
+---
+
+
 ## ✅ All Fixes Applied Successfully
 
 Your ticket project has been comprehensively updated with **14 critical bug fixes** and security improvements. Follow these steps to get it running.

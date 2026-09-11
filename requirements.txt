@@ -5,3 +5,9 @@ openpyxl
 qrcode[pil]
 pdfplumber
 gunicorn
+
+# OCR for scanned/photographed tickets. PyMuPDF renders the pages and needs no
+# system packages; pytesseract is a wrapper and also needs the tesseract-ocr
+# binary installed (see README). Uploads fall back to manual entry without it.
+pytesseract
+PyMuPDF

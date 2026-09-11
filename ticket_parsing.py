@@ -21,6 +21,50 @@ TIME_RE = re.compile(r"\b(\d{1,2}):([0-5]\d)\s*([AP]M)\b", re.IGNORECASE)
 MONEY_RE = r"(?:INR|[$€£])?\s*(-?[\d,]+\.\d{2})"
 
 
+OCR_MAX_PAGES = 3
+OCR_DPI = 300
+
+
+def ocr_available():
+    """True when both the Python bindings and the tesseract binary are present."""
+    try:
+        import pymupdf  # noqa: F401
+        import pytesseract
+
+        pytesseract.get_tesseract_version()
+        return True
+    except Exception:
+        return False
+
+
+def ocr_pdf_bytes(data, max_pages=OCR_MAX_PAGES, dpi=OCR_DPI):
+    """Read a scanned PDF by rendering its pages and running OCR over them.
+
+    Returns "" when OCR is unavailable, so callers can fall back to telling the
+    user the file is a scan rather than failing outright. Only the first few
+    pages are read: tickets are one or two pages and OCR costs seconds each.
+    """
+    try:
+        import io
+
+        import pymupdf
+        import pytesseract
+        from PIL import Image
+    except ImportError:
+        return ""
+
+    try:
+        with pymupdf.open(stream=data, filetype="pdf") as document:
+            pages = []
+            for page in list(document)[:max_pages]:
+                pixmap = page.get_pixmap(dpi=dpi)
+                image = Image.open(io.BytesIO(pixmap.tobytes("png")))
+                pages.append(pytesseract.image_to_string(image))
+        return "\n".join(pages).strip()
+    except Exception:
+        return ""
+
+
 def normalize_text(text):
     """Fold typographic punctuation to ASCII.
 

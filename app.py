@@ -37,6 +37,8 @@ from utils import generate_qr, generate_ticket_number
 from ticket_parsing import (
     looks_like_own_ticket,
     normalize_text,
+    ocr_available,
+    ocr_pdf_bytes,
     parse_agency_ticket,
     parse_own_ticket,
 )
@@ -310,8 +312,9 @@ def parse_date_str(value):
     # (?!\d) stops a 4-digit year being split into a day and a 2-digit year,
     # which turned "32 Jan 2026" into 2026-01-20 instead of rejecting it.
     patterns = (
-        rf"\b(\d{{1,2}})(?!\d)[\s\-.]*({month_names})[A-Z]*[\s\-.,]*(\d{{2,4}})\b",
-        rf"\b({month_names})[A-Z]*[\s\-.]+(\d{{1,2}})(?!\d)[\s\-.,]+(\d{{2,4}})\b",
+        # The year may be abbreviated with an apostrophe, as in "04 MAY '26".
+        rf"\b(\d{{1,2}})(?!\d)[\s\-.]*({month_names})[A-Z]*[\s\-.,']*(\d{{2,4}})\b",
+        rf"\b({month_names})[A-Z]*[\s\-.]+(\d{{1,2}})(?!\d)[\s\-.,']+(\d{{2,4}})\b",
     )
     for index, pattern in enumerate(patterns):
         match = re.search(pattern, upper)
@@ -426,10 +429,52 @@ def extract_ticket_fields(text, filename=""):
                 return value
         return ""
 
-    pnr = first_group([
-        r"\bPNR\b\s*[:\-]?\s*([A-Z0-9]{5,8})",
-        r"\bBOOKING\s*REF(?:ERENCE)?\b\s*[:\-]?\s*([A-Z0-9]{5,10})",
-    ], require_digit=True)
+    # Airline PNRs are frequently all letters (YDKKHA), so a digit cannot be
+    # required; guard against matching the neighbouring words instead.
+    PNR_NOISE = {
+        "ETICKET", "TICKET", "NUMBER", "STATUS", "AIRLINE", "FLIGHT", "BOOKING",
+        "DETAILS", "SECTOR", "SEATNO", "REFERENCE", "CONFIRM", "CONFIRMED",
+    }
+
+    def looks_like_pnr(value):
+        value = (value or "").strip().upper()
+        return bool(re.fullmatch(r"[A-Z0-9]{5,8}", value)) and value not in PNR_NOISE
+
+    pnr = ""
+    # [ \t] rather than \s: allowing newlines matched "PNR" at the end of one
+    # line against an unrelated word on the next.
+    for pattern in (
+        r"\bPNR\b[ \t]*(?:NO\.?|NUMBER)?[ \t]*[:\-]?[ \t]*([A-Z0-9]{5,8})\b",
+        r"\bBOOKING[ \t]*REF(?:ERENCE)?\b[ \t]*[:\-]?[ \t]*([A-Z0-9]{5,10})\b",
+    ):
+        match = re.search(pattern, text_upper)
+        if match and looks_like_pnr(match.group(1)):
+            pnr = match.group(1).strip()
+            break
+
+    # Column layouts print the value on the row beneath its heading. Require a
+    # real heading: "PNR" alone is also an airport code (Pointe Noire), so it
+    # appears in reference tables that are not tickets at all.
+    if not pnr:
+        heading_words = ("PASSENGER", "NAME", "TICKET", "SEAT", "STATUS", "AIRLINE")
+        for idx, line in enumerate(lines):
+            upper_line = line.upper()
+            if not re.search(r"\bPNR\b", upper_line):
+                continue
+            if sum(1 for word in heading_words if word in upper_line) < 2:
+                continue
+            for following in lines[idx + 1:idx + 3]:
+                # Drop a row index and any "Mr Firstname Lastname" so the
+                # traveller's surname is not mistaken for the reference.
+                stripped = re.sub(r"^\s*\d{1,2}[.)]\s*", "", following.upper())
+                stripped = re.sub(r"\b(MR|MRS|MS|MISS|MSTR)\.?(\s+[A-Z][A-Z']*)+", " ", stripped)
+                tokens = [t for t in re.findall(r"\b[A-Z0-9]{5,8}\b", stripped)
+                          if looks_like_pnr(t)]
+                if tokens:
+                    pnr = tokens[-1]
+                    break
+            if pnr:
+                break
 
     booking_id = first_group([
         r"\bBOOKING\s*ID\b\s*[:\-]?\s*([A-Z0-9\-]{5,20})",
@@ -437,6 +482,21 @@ def extract_ticket_fields(text, filename=""):
         r"\bORDER\s*ID\b\s*[:\-]?\s*([A-Z0-9\-]{5,20})",
         r"\bTRANSACTION\s*ID\b\s*[:\-]?\s*([A-Z0-9\-]{5,20})",
     ], require_digit=True)
+
+    # Same column-heading layout as the PNR above.
+    if not booking_id:
+        for idx, line in enumerate(lines):
+            if not re.search(r"\bBOOKING\s*(ID|REF|NO)\b", line, re.I):
+                continue
+            if re.search(r"\bBOOKING\s*(ID|REF|NO)\b[^A-Z0-9]*[A-Z0-9]{5,}", line, re.I):
+                continue
+            for following in lines[idx + 1:idx + 4]:
+                token = re.fullmatch(r"([A-Z0-9][A-Z0-9\-]{4,19})", following.strip().upper())
+                if token:
+                    booking_id = token.group(1)
+                    break
+            if booking_id:
+                break
 
     booking_date = ""
     booking_date_match = re.search(r"(BOOKING DATE|BOOKED ON|DATE OF BOOKING|ISSUE DATE)\s*[:\-]?\s*([0-9A-Za-z /-]{6,})", text_upper)
@@ -495,9 +555,12 @@ def extract_ticket_fields(text, filename=""):
                 "BHARAT", "HORIZON", "TRAVELS", "ANKIT",
             ]):
                 continue
-            if re.search(r"\d", upper):
-                continue
-            match = re.search(r"\b(MR|MRS|MS|MISS|MSTR|CHD|INF)\.?\s+([A-Z][A-Z\s']{2,40})\b", upper)
+            # Rows are often numbered ("1. Ms Alka Agarwal, YDKKHA"), so drop a
+            # leading index before rejecting the line for containing digits.
+            candidate = re.sub(r"^\s*\d{1,2}[.)]\s*", "", upper)
+            match = re.search(
+                r"\b(MR|MRS|MS|MISS|MSTR|CHD|INF)\.?\s+([A-Z][A-Z\s']{2,40}?)"
+                r"(?=\s*[,|]|\s{2,}|\s+\d|$)", candidate)
             if match:
                 name = re.sub(r"\s{2,}", " ", match.group(2)).strip()
                 if len(name.split()) < 2:
@@ -506,14 +569,6 @@ def extract_ticket_fields(text, filename=""):
                     title_name = name.title()
                     if title_name not in [p["name"] for p in passengers]:
                         passengers.append({"name": title_name})
-    if not passengers and (platform or pnr or booking_id):
-        for line in lines:
-            upper = line.upper()
-            if any(keyword in upper for keyword in ["PASSENGER", "TRAVELLER", "TRAVELER", "GUEST"]):
-                continue
-            if re.search(r"\b[A-Z]{2,}\b", upper) and len(upper.split()) <= 4:
-                if all(word not in STOPWORDS_3 for word in upper.split()):
-                    passengers.append({"name": line.title()})
 
     flight_numbers = []
     for match in re.finditer(r"\b([A-Z]{2,3})\s?-?\s?(\d{2,4})\b", text_upper):
@@ -581,8 +636,13 @@ def extract_ticket_fields(text, filename=""):
                 from_code, to_code = codes[0], codes[1]
         if not (is_valid_airport_code(from_code) and is_valid_airport_code(to_code)):
             continue
+        if from_code == to_code:
+            # A single code repeated in prose is not a leg.
+            continue
         seg = {"from_code": from_code, "to_code": to_code}
-        date_iso = find_first_date(upper)
+        # The date is often printed on the row below the route, so widen the
+        # search past the current line when it is not on it.
+        date_iso = find_first_date(upper) or find_first_date("\n".join(lines[idx:idx + 3]))
         times = find_times(upper)
         if date_iso:
             seg["date"] = date_iso
@@ -592,8 +652,17 @@ def extract_ticket_fields(text, filename=""):
                 seg["arr_time_raw"] = times[1]
         segments.append(seg)
 
-    if not platform and not pnr and not booking_id and len(segments) > 6:
-        segments = []
+    # A page of airport codes yields plenty of "routes" that carry no time,
+    # date or flight number. Real legs have at least one of those.
+    if not platform:
+        substantive = [
+            seg for seg in segments
+            if seg.get("dep_time_raw") or seg.get("date") or seg.get("flight_no")
+        ]
+        if not substantive:
+            segments = []
+        elif len(segments) > 6:
+            segments = substantive
 
     # Collapse segments describing the same leg. The flight number is
     # deliberately not part of the key: the same leg is often matched twice,
@@ -853,6 +922,22 @@ def get_airlines():
     return jsonify(airline_payload())
 
 
+@app.route("/api/health", methods=["GET"])
+def health():
+    """Surface optional-feature availability, so a missing tesseract binary on
+    the server can be spotted without uploading a scan to find out."""
+    return jsonify({
+        "status": "ok",
+        "airports": len(AIRPORTS_DB),
+        "airlines": len(airline_payload()),
+        "ocr": ocr_available(),
+        "whatsapp": bool(
+            os.getenv("WHATSAPP_ACCESS_TOKEN", "").strip()
+            and os.getenv("WHATSAPP_PHONE_NUMBER_ID", "").strip()
+        ),
+    })
+
+
 @app.route("/api/whatsapp-config", methods=["GET"])
 def whatsapp_config():
     load_local_env()
@@ -906,15 +991,31 @@ def parse_ticket():
         log.error("Failed to read PDF: %s", exc)
         return jsonify({"error": f"Failed to read PDF: {exc}"}), 500
 
-    if not text:
-        log.warning("No readable text found in PDF: %s", filename)
-        return jsonify({"error": "No readable text found in PDF. (Might be a scanned image or corrupted file)"}), 422
-
-    log.info("Processing %s - text length: %d chars", filename, len(text))
+    # Too little embedded text means the pages are images, so read them with OCR.
+    used_ocr = False
     if len(text) < 50:
-        log.warning("PDF text too short (%d chars)", len(text))
-        return jsonify({"error": "PDF text extraction returned almost no content. This may be a scanned image. Please use a digital ticket PDF or fill details manually."}), 422
-    
+        log.info("Only %d chars of text in %s - trying OCR.", len(text), filename)
+        ocr_text = ocr_pdf_bytes(data)
+        if len(ocr_text) > len(text):
+            text, used_ocr = ocr_text, True
+            log.info("OCR recovered %d chars from %s", len(text), filename)
+
+    if len(text) < 50:
+        if not ocr_available():
+            log.warning("Scanned PDF and OCR is unavailable: %s", filename)
+            return jsonify({
+                "error": "This looks like a scanned or photographed ticket, and text "
+                         "recognition is not installed on the server. Please fill the "
+                         "form manually, or upload the original digital PDF.",
+            }), 422
+        log.warning("OCR could not read %s", filename)
+        return jsonify({
+            "error": "This looks like a scanned ticket, but the text could not be read. "
+                     "Try a clearer scan or the original digital PDF, or fill the form manually.",
+        }), 422
+
+    log.info("Processing %s - %d chars%s", filename, len(text), " via OCR" if used_ocr else "")
+
     extracted = extract_ticket_fields(text, filename=filename)
     
     if not extracted.get("pnr") and not extracted.get("booking_id") and not extracted.get("flights"):

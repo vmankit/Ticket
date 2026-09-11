@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, send_file, jsonify, render_template_string
+from flask import Flask, g, render_template, request, send_file, jsonify, render_template_string
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.colors import HexColor, black, white
 from reportlab.platypus import Table, TableStyle, Paragraph, Spacer, Image
@@ -7,14 +7,17 @@ from reportlab.pdfgen import canvas
 from reportlab.graphics.barcode.code128 import Code128
 import io
 import json
+import logging
 import os
 import re
+import tempfile
 import uuid
 import urllib.error
 import urllib.request
 from datetime import datetime, timedelta
 from functools import lru_cache
 from openpyxl import Workbook, load_workbook
+from werkzeug.exceptions import HTTPException
 from werkzeug.utils import secure_filename
 
 # Try to import CSRF protection, but make it optional
@@ -29,9 +32,40 @@ except ImportError:
 from airports_data import AIRPORTS_DB
 from excel_tracker import get_next_booking_id, save_to_excel
 from utils import generate_qr, generate_ticket_number
+from validation import (
+    parse_money,
+    validate_booking,
+    validate_flights,
+    validate_passengers,
+)
+
+logging.basicConfig(
+    level=os.environ.get("LOG_LEVEL", "INFO").upper(),
+    format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+)
+log = logging.getLogger("ticket")
+
+MAX_UPLOAD_BYTES = 15 * 1024 * 1024
 
 app = Flask(__name__)
-app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "dev-secret-key-change-me")
+
+DEV_SECRET_KEY = "dev-secret-key-change-me"
+_secret_key = os.environ.get("SECRET_KEY", "").strip()
+IS_PRODUCTION = os.environ.get("FLASK_ENV", "").lower() == "production" or bool(
+    os.environ.get("RENDER") or os.environ.get("DYNO")
+)
+if not _secret_key:
+    if IS_PRODUCTION:
+        # Session cookies and CSRF tokens signed with a public constant are
+        # forgeable by anyone who has read this repository.
+        raise RuntimeError(
+            "SECRET_KEY environment variable must be set in production. "
+            "Generate one with: python -c \"import secrets; print(secrets.token_hex(32))\""
+        )
+    _secret_key = DEV_SECRET_KEY
+    log.warning("SECRET_KEY not set - using the insecure development key.")
+app.config["SECRET_KEY"] = _secret_key
+app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_BYTES
 
 # Initialize CSRF protection if available
 if CSRF_AVAILABLE:
@@ -749,9 +783,11 @@ def search_airports():
 
 @app.route("/api/airport-info", methods=["POST"])
 def airport_info():
-    data = request.get_json()
-    code = data.get("code", "").strip().upper()
-    info = AIRPORTS_DB.get(code, None)
+    data = request.get_json(silent=True) or {}
+    code = str(data.get("code", "")).strip().upper()
+    if not code:
+        return jsonify({"found": False, "error": "A 'code' field is required."}), 400
+    info = AIRPORTS_DB.get(code)
     if info:
         return jsonify({"found": True, "city": info["city"], "airport": info["airport"], "country": info.get("country", "")})
     return jsonify({"found": False})
@@ -812,16 +848,16 @@ def parse_ticket():
             pages = [page.extract_text() or "" for page in pdf.pages]
         text = "\n".join(pages).strip()
     except Exception as exc:
-        print(f"[PDF Extract Error] Failed to read PDF: {exc}")
+        log.error("Failed to read PDF: %s", exc)
         return jsonify({"error": f"Failed to read PDF: {exc}"}), 500
 
     if not text:
-        print(f"[PDF Extract Warning] No readable text found in PDF: {filename}")
+        log.warning("No readable text found in PDF: %s", filename)
         return jsonify({"error": "No readable text found in PDF. (Might be a scanned image or corrupted file)"}), 422
 
-    print(f"[PDF Extract] Processing {filename} - Text length: {len(text)} chars")
+    log.info("Processing %s - text length: %d chars", filename, len(text))
     if len(text) < 50:
-        print(f"[PDF Extract Warning] Text too short ({len(text)} chars). First 500: {text}")
+        log.warning("PDF text too short (%d chars)", len(text))
         return jsonify({"error": "PDF text extraction returned almost no content. This may be a scanned image. Please use a digital ticket PDF or fill details manually."}), 422
     
     extracted = extract_ticket_fields(text, filename=filename)
@@ -829,23 +865,145 @@ def parse_ticket():
     if not extracted.get("pnr") and not extracted.get("booking_id"):
         if not extracted.get("booking_platform"):
             # No platform detected, try to find at least some booking info
-            print(f"[PDF Extract Warning] Could not identify recognized platform. Text snippet: {text[:300]}")
+            log.warning("Could not identify a recognised booking platform.")
             return jsonify({"error": "Could not recognize ticket format (MakeMyTrip, Paytm, Cleartrip, Goibibo not detected). Please fill details manually. You can also upload a ticket from supported platforms.", "detected_platform": extracted.get("booking_platform", "unknown"), "raw_text_available": True}), 422
         else:
             # Platform detected but no booking ID/PNR found
-            print(f"[PDF Extract] Platform {extracted.get('booking_platform')} detected but missing booking ID/PNR")
+            log.info("Platform %s detected but booking ID/PNR missing", extracted.get("booking_platform"))
     
     extracted["raw_excerpt"] = text[:1200]
     if extracted.get("booking_platform"):
-        print(f"[PDF Extract Success] Detected platform: {extracted.get('booking_platform')}, PNR: {extracted.get('pnr')}, Booking ID: {extracted.get('booking_id')}")
+        log.info(
+            "Extracted platform=%s pnr=%s booking_id=%s",
+            extracted.get("booking_platform"), extracted.get("pnr"), extracted.get("booking_id"),
+        )
     else:
-        print(f"[PDF Extract] Completed but platform not recognized. Manual entry may be needed.")
+        log.info("PDF parsed but platform not recognised; manual entry may be needed.")
     return jsonify(extracted)
 
 
 @app.route("/api/test-extract", methods=["GET"])
 def test_extract():
     return jsonify({"error": "PDF extraction is temporarily disabled. Please fill the form manually."}), 410
+
+
+MAX_BARCODE_BYTES = 4 * 1024 * 1024
+
+
+def save_barcode_upload(upload):
+    """Persist an uploaded barcode image to a temp file, or return None.
+
+    The upload is fully decoded and re-encoded as PNG rather than trusting the
+    filename, content type or magic bytes. A header-only check is not enough:
+    a truncated image passes it and then crashes ReportLab during PDF layout,
+    because Image flowables decode lazily, long after the upload is handled.
+    """
+    if not upload or not upload.filename:
+        return None
+
+    data = upload.read(MAX_BARCODE_BYTES + 1)
+    if len(data) > MAX_BARCODE_BYTES:
+        log.warning("Rejected barcode upload %r: larger than 4 MB.", upload.filename)
+        return None
+
+    try:
+        from PIL import Image as PILImage
+
+        with PILImage.open(io.BytesIO(data)) as probe:
+            probe.verify()  # checksum/structure check; consumes the object
+        with PILImage.open(io.BytesIO(data)) as image:
+            normalised = image.convert("RGB")
+    except Exception as exc:
+        log.warning("Rejected barcode upload %r: not a readable image (%s).", upload.filename, exc)
+        return None
+
+    path = os.path.join(
+        tempfile.gettempdir(), secure_filename(f"temp_barcode_{uuid.uuid4()}.png")
+    )
+    try:
+        normalised.save(path, format="PNG")
+    except (OSError, ValueError) as exc:
+        log.warning("Could not save barcode upload: %s", exc)
+        return None
+
+    # Registered so the file is removed even if PDF generation raises.
+    if not hasattr(g, "temp_files"):
+        g.temp_files = []
+    g.temp_files.append(path)
+    return path
+
+
+def cleanup_temp_files(flights):
+    """Remove temp barcode uploads. Safe to call more than once."""
+    for flight in flights or []:
+        path = flight.get("barcode_path")
+        if not path:
+            continue
+        _remove_temp_file(path)
+        flight["barcode_path"] = None
+
+
+def _remove_temp_file(path):
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+    if hasattr(g, "temp_files") and path in g.temp_files:
+        g.temp_files.remove(path)
+
+
+@app.teardown_request
+def _cleanup_leftover_temp_files(_exception):
+    """Safety net: drop any barcode temp file the request did not clean up."""
+    for path in list(getattr(g, "temp_files", [])):
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+
+
+VALIDATION_ERROR_PAGE = """<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Check your ticket details</title>
+    <style>
+        *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+        body{font-family:Inter,-apple-system,Segoe UI,Arial,sans-serif;background:#eef2f6;
+             color:#162033;min-height:100vh;display:flex;align-items:center;
+             justify-content:center;padding:24px;line-height:1.6}
+        .box{background:#fff;border:1px solid #d9e0ea;border-radius:14px;
+             box-shadow:0 24px 70px rgba(15,39,66,.12);padding:32px;max-width:620px;width:100%}
+        .tag{display:inline-block;background:#fdecea;color:#c24135;padding:6px 12px;
+             border-radius:999px;font-weight:800;font-size:.7rem;letter-spacing:1px;margin-bottom:14px}
+        h1{color:#0f2742;font-size:1.4rem;margin-bottom:6px}
+        p.lead{color:#667085;font-size:.9rem;margin-bottom:18px}
+        ul{list-style:none;display:flex;flex-direction:column;gap:8px;margin-bottom:24px}
+        li{background:#f6f8fb;border-left:3px solid #c24135;border-radius:6px;
+           padding:10px 14px;font-size:.86rem}
+        a{display:inline-block;background:#0e9488;color:#fff;text-decoration:none;
+          padding:12px 22px;border-radius:10px;font-weight:800;font-size:.88rem}
+        a:hover{background:#0b7f75}
+    </style>
+</head>
+<body>
+    <div class="box">
+        <div class="tag">TICKET NOT GENERATED</div>
+        <h1>Please fix {{ count }} item{{ '' if count == 1 else 's' }}</h1>
+        <p class="lead">Nothing was saved. Go back, correct the details below and generate again.</p>
+        <ul>{% for error in errors %}<li>{{ error }}</li>{% endfor %}</ul>
+        <a href="javascript:history.back()">Back to the form</a>
+    </div>
+</body>
+</html>"""
+
+
+def render_validation_errors(errors):
+    """Return validation failures as JSON for API clients, HTML for the form."""
+    if request.accept_mimetypes.best == "application/json" or request.is_json:
+        return jsonify({"error": "Validation failed", "errors": errors}), 400
+    return render_template_string(VALIDATION_ERROR_PAGE, errors=errors, count=len(errors)), 400
 
 
 @app.route("/generate", methods=["POST"])
@@ -917,20 +1075,11 @@ def generate_ticket():
             dep_dt = datetime.strptime(dep_time_raw, "%H:%M")
             checkin_dt = dep_dt - timedelta(minutes=60)
             checkin_closing = checkin_dt.strftime("%H:%M")
-        except:
+        except ValueError:
             checkin_closing = ""
 
         barcode_file = request.files.get(f"{prefix}barcode")
-        temp_barcode_path = None
-        if barcode_file and barcode_file.filename:
-            # Use secure filename with UUID to prevent path traversal attacks
-            safe_filename = f"temp_barcode_{uuid.uuid4()}.png"
-            temp_barcode_path = os.path.join(os.path.dirname(__file__), secure_filename(safe_filename))
-            try:
-                barcode_file.save(temp_barcode_path)
-            except Exception as e:
-                print(f"Error saving barcode: {e}")
-                temp_barcode_path = None
+        temp_barcode_path = save_barcode_upload(barcode_file)
 
         # Auto-fill city from DB
         if not from_city and from_code in AIRPORTS_DB:
@@ -1001,11 +1150,11 @@ def generate_ticket():
                         fl2["layover"] = f"{hours}h {mins}m ({layover_type})"
                 except ValueError as e:
                     # Invalid date/time format - skip layover calculation
-                    print(f"Layover calc error: {e}")
+                    log.warning("Layover calculation error: %s", e)
                     continue
         except Exception as e:
             # Log error but don't fail entire PDF generation
-            print(f"Layover calculation error: {e}")
+            log.warning("Layover calculation error: %s", e)
             continue
 
     # ── Parse multiple passengers ────────────────────────────
@@ -1069,19 +1218,31 @@ def generate_ticket():
         })
 
     # ── Fare details ─────────────────────────────────────────
-    try:
-        base_fare = float(request.form.get("base_fare", 0))
-        taxes = float(request.form.get("taxes_fees", 0))
-        insurance = float(request.form.get("insurance", 0))
-        meals_fee = float(request.form.get("meals_fee", 0))
-        baggage_fee = float(request.form.get("baggage_fee", 0))
-        seats_fee = float(request.form.get("seats_fee", 0))
-        zero_cancel = float(request.form.get("zero_cancel", 0))
-        discount = float(request.form.get("discount", 0))
-    except:
-        base_fare = taxes = insurance = meals_fee = baggage_fee = seats_fee = zero_cancel = discount = 0.0
-        
+    # Each field is parsed independently: a single malformed entry must not
+    # silently zero the whole breakdown and issue an INR 0.00 ticket.
+    fare_errors = []
+    base_fare = parse_money(request.form.get("base_fare"), "Base Fare", fare_errors, required=True)
+    taxes = parse_money(request.form.get("taxes_fees"), "Airline Taxes & Fees", fare_errors, required=True)
+    insurance = parse_money(request.form.get("insurance"), "Insurance", fare_errors)
+    meals_fee = parse_money(request.form.get("meals_fee"), "Meals", fare_errors)
+    baggage_fee = parse_money(request.form.get("baggage_fee"), "Baggage", fare_errors)
+    seats_fee = parse_money(request.form.get("seats_fee"), "Seats", fare_errors)
+    zero_cancel = parse_money(request.form.get("zero_cancel"), "Zero Cancel", fare_errors)
+    discount = parse_money(request.form.get("discount"), "Discount", fare_errors)
+
     total_fare = base_fare + taxes + insurance + meals_fee + baggage_fee + seats_fee + zero_cancel - discount
+    if not fare_errors and total_fare < 0:
+        fare_errors.append("Discount cannot exceed the total of all other fare components.")
+
+    errors = (
+        validate_booking(request.form)
+        + validate_flights(flights)
+        + validate_passengers(passengers)
+        + fare_errors
+    )
+    if errors:
+        cleanup_temp_files(flights)
+        return render_validation_errors(errors)
     base_fare_str = f"INR {base_fare:,.2f}"
     taxes_fees_str = f"INR {taxes:,.2f}"
     total_fare_str = f"INR {total_fare:,.2f}"
@@ -1455,8 +1616,8 @@ def generate_ticket():
                 try:
                     img = Image(fl["barcode_path"], width=50, height=20)
                     sector_elements.append(img)
-                except:
-                    pass
+                except Exception as exc:
+                    log.warning("Could not embed barcode image: %s", exc)
             sector_elements.append(Spacer(1, 6))
 
         # Build seat/meal/baggage display per segment when available
@@ -1705,21 +1866,19 @@ def generate_ticket():
         try:
             save_to_excel(excel_data)
         except Exception as e:
-            print(f"Error saving to Excel: {e}")
+            log.error("Error saving to Excel: %s", e)
 
-    # Clean up temp barcode images
-    for fl in flights:
-        p = fl.get("barcode_path")
-        if p and os.path.exists(p):
-            try:
-                os.remove(p)
-            except:
-                pass
+    cleanup_temp_files(flights)
 
-    output_path = os.path.join(os.path.dirname(__file__), "ticket_output.pdf")
     pdf_bytes = buffer.getvalue()
-    with open(output_path, "wb") as f:
-        f.write(pdf_bytes)
+    # Writing a fixed ticket_output.pdf on every request races between
+    # concurrent generations and fails on read-only hosts, so it is opt-in.
+    if os.getenv("SAVE_LAST_PDF", "").lower() in ("1", "true", "yes"):
+        try:
+            with open(os.path.join(os.path.dirname(__file__), "ticket_output.pdf"), "wb") as f:
+                f.write(pdf_bytes)
+        except OSError as exc:
+            log.warning("Could not write ticket_output.pdf: %s", exc)
     buffer.seek(0)
 
     dl_name = f"Ticket_{pnr or booking_id or 'output'}.pdf"
@@ -1752,8 +1911,6 @@ def generate_ticket():
         .ok{display:inline-block;background:#e7f7f5;color:#0e9488;padding:6px 10px;border-radius:999px;font-weight:800;font-size:12px;margin-bottom:14px}
         a{display:inline-block;margin-top:14px;background:#0e9488;color:#fff;text-decoration:none;padding:12px 18px;border-radius:10px;font-weight:800}
         small{display:block;margin-top:16px;color:#667085;word-break:break-all}
-        details{margin-top:20px;padding-top:15px;border-top:1px solid #eee;font-size:11px;color:#999}
-        pre{background:#f8f9fa;padding:8px;overflow:auto;max-height:200px}
     </style>
 </head>
 <body>
@@ -1763,16 +1920,12 @@ def generate_ticket():
         <p>The generated PDF ticket was uploaded and sent as a WhatsApp document.</p>
         <a href="/">Create another ticket</a>
         {% if message_id %}<small>Message ID: {{ message_id }}</small>{% endif %}
-        
-        <details>
-            <summary>API Response Details (Debug)</summary>
-            <pre>{{ full_response | tojson(indent=2) }}</pre>
-        </details>
     </div>
 </body>
 </html>
-            """, phone=customer_phone, message_id=message_id, full_response=api_resp)
+            """, phone=customer_phone, message_id=message_id)
         except Exception as e:
+            log.exception("WhatsApp delivery failed")
             return render_template_string("""
 <!DOCTYPE html>
 <html lang="en">
@@ -1794,7 +1947,7 @@ def generate_ticket():
     <div class="box">
         <div class="bad">WHATSAPP NOT SENT</div>
         <h1>Ticket generated, but WhatsApp failed</h1>
-        <p>The PDF is saved as <b>ticket_output.pdf</b>. Check the setup/error below.</p>
+        <p>The ticket PDF was generated, but the WhatsApp delivery failed. Check the error below.</p>
         <pre>{{ error }}</pre>
         <a href="/">Back to generator</a>
     </div>
@@ -1803,6 +1956,74 @@ def generate_ticket():
             """, error=str(e)), 500
 
     return send_file(buffer, as_attachment=True, download_name=dl_name, mimetype="application/pdf")
+
+
+ERROR_PAGE = """<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ title }}</title>
+    <style>
+        *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+        body{font-family:Inter,-apple-system,Segoe UI,Arial,sans-serif;background:#eef2f6;
+             color:#162033;min-height:100vh;display:flex;align-items:center;
+             justify-content:center;padding:24px;line-height:1.6}
+        .box{background:#fff;border:1px solid #d9e0ea;border-radius:14px;
+             box-shadow:0 24px 70px rgba(15,39,66,.12);padding:32px;max-width:520px;
+             width:100%;text-align:center}
+        .code{font-size:3rem;font-weight:800;color:#0e9488;line-height:1}
+        h1{color:#0f2742;font-size:1.3rem;margin:10px 0 6px}
+        p{color:#667085;font-size:.9rem;margin-bottom:22px}
+        a{display:inline-block;background:#0e9488;color:#fff;text-decoration:none;
+          padding:12px 24px;border-radius:10px;font-weight:800;font-size:.88rem}
+        a:hover{background:#0b7f75}
+    </style>
+</head>
+<body>
+    <div class="box">
+        <div class="code">{{ status }}</div>
+        <h1>{{ title }}</h1>
+        <p>{{ message }}</p>
+        <a href="/">Back to the generator</a>
+    </div>
+</body>
+</html>"""
+
+
+def _error_response(status, title, message):
+    if request.path.startswith("/api/") or request.is_json:
+        return jsonify({"error": title, "message": message}), status
+    return render_template_string(ERROR_PAGE, status=status, title=title, message=message), status
+
+
+@app.errorhandler(404)
+def handle_not_found(_error):
+    return _error_response(404, "Page not found", "That page does not exist.")
+
+
+@app.errorhandler(413)
+def handle_too_large(_error):
+    return _error_response(
+        413,
+        "Upload too large",
+        f"Files must be under {MAX_UPLOAD_BYTES // (1024 * 1024)} MB.",
+    )
+
+
+@app.errorhandler(500)
+@app.errorhandler(Exception)
+def handle_unexpected(error):
+    # Let Flask's own HTTP errors (404, 413, ...) keep their status codes.
+    if isinstance(error, HTTPException):
+        return _error_response(error.code, error.name, error.description)
+    log.exception("Unhandled error on %s %s", request.method, request.path)
+    return _error_response(
+        500,
+        "Something went wrong",
+        "The ticket could not be generated. Please try again, and check the "
+        "server logs if this keeps happening.",
+    )
 
 
 if __name__ == "__main__":

@@ -1,8 +1,12 @@
+import json
 import os
 import sys
-from openpyxl import Workbook, load_workbook
-from datetime import datetime
+import threading
 import time
+import uuid
+from datetime import datetime
+
+from openpyxl import Workbook, load_workbook
 
 # Cross-platform file locking
 if sys.platform == 'win32':
@@ -35,20 +39,73 @@ else:
             pass
 
 EXCEL_FILE = "ticket_records.xlsx"
+COUNTER_FILE = "booking_counter.json"
 
-def get_next_booking_id(platform_code="AT"):
-    """Generates the next booking ID automatically by reading the excel file."""
+# Guards the counter against other threads in this process; the OS file lock
+# below guards it against other processes (e.g. multiple gunicorn workers).
+_counter_lock = threading.Lock()
+
+
+def _lock_file_blocking(f, attempts=50, delay=0.1):
+    """Take an exclusive OS lock, retrying briefly if another worker holds it."""
+    for _ in range(attempts):
+        if lock_file(f):
+            return True
+        time.sleep(delay)
+    return False
+
+
+def _seed_sequence_from_excel():
+    """Back-fill the counter from existing rows the first time it is used."""
     if not os.path.exists(EXCEL_FILE):
-        return f"{platform_code}-{datetime.now().strftime('%Y%m%d')}-0001"
-    
+        return 0
     try:
         wb = load_workbook(EXCEL_FILE)
-        ws = wb.active
-        sno = max(0, ws.max_row - 1)  # Subtract 1 for header row
-        return f"{platform_code}-{datetime.now().strftime('%Y%m%d')}-{sno+1:04d}"
+        return max(0, wb.active.max_row - 1)  # minus the header row
     except Exception as e:
-        print(f"Error reading Excel for booking ID: {e}")
-        return f"{platform_code}-{datetime.now().strftime('%Y%m%d')}-0001"
+        print(f"Error seeding booking counter from Excel: {e}")
+        return 0
+
+
+def get_next_booking_id(platform_code="AT"):
+    """Reserve and return the next booking ID.
+
+    The sequence is incremented and persisted atomically, so concurrent
+    requests can never be handed the same ID. Deriving it from the row count
+    instead let every simultaneous request read the same value.
+    """
+    today = datetime.now().strftime("%Y%m%d")
+
+    with _counter_lock:
+        try:
+            with open(COUNTER_FILE, "a+") as f:
+                if not _lock_file_blocking(f):
+                    raise TimeoutError("Could not lock the booking counter.")
+                try:
+                    f.seek(0)
+                    raw = f.read().strip()
+                    state = json.loads(raw) if raw else {}
+
+                    if state.get("date") == today:
+                        sequence = int(state.get("seq", 0)) + 1
+                    else:
+                        # New day: continue past any pre-existing rows once.
+                        sequence = (_seed_sequence_from_excel() if not state else 0) + 1
+
+                    f.seek(0)
+                    f.truncate()
+                    json.dump({"date": today, "seq": sequence}, f)
+                    f.flush()
+                    os.fsync(f.fileno())
+                finally:
+                    unlock_file(f)
+        except Exception as e:
+            # Never block ticket generation on the counter; fall back to a
+            # collision-resistant random suffix instead of a duplicate number.
+            print(f"Error reserving booking ID: {e}")
+            return f"{platform_code}-{today}-{uuid.uuid4().hex[:6].upper()}"
+
+    return f"{platform_code}-{today}-{sequence:04d}"
 
 def save_to_excel(data):
     """Saves ticket data to the excel tracker with proper file locking."""

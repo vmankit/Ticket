@@ -124,9 +124,6 @@
             .header-inner{align-items:flex-start;flex-direction:column;padding:0 16px}
             .header .db-badge{white-space:normal}
             .fare-total{align-items:flex-start;flex-direction:column;gap:6px}
-            .simple-card{padding:24px 16px !important}
-            .simple-card > div[style*="display:flex"]{flex-direction:column}
-            .simple-card input,.simple-card button{width:100%}
             .upload-actions{flex-wrap:wrap}
             .submit-section .btn-generate{width:100%}
         }
@@ -134,8 +131,6 @@
         ::-webkit-scrollbar{width:6px}
         ::-webkit-scrollbar-track{background:transparent}
         ::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
-        .advanced-hidden{display:none}
-        .simple-card input:focus{box-shadow:0 6px 20px rgba(15,39,66,.06);border-color:var(--accent)}
     </style>
 </head>
 <body>
@@ -156,23 +151,7 @@
         <form id="ticketForm" action="/generate" method="POST" enctype="multipart/form-data">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
-            <!-- Simple Google-like UI -->
-            <div class="card simple-card" style="text-align:center;padding:36px 24px;margin-bottom:18px">
-                <h2 style="margin-bottom:10px;color:var(--primary);font-size:1.05rem;letter-spacing:0.6px">Quick Ticket — Search or Paste PNR</h2>
-                <div style="max-width:720px;margin:12px auto;display:flex;gap:10px;align-items:center;justify-content:center">
-                    <input id="simplePnr" type="text" placeholder="Enter PNR or Booking Ref (e.g. ABC123)" style="flex:1;padding:14px 18px;border-radius:32px;border:1px solid var(--border);font-size:1rem;box-shadow:none;outline:none">
-                    <button type="button" id="simpleGenerate" class="btn-generate" style="padding:12px 20px;border-radius:28px;">Continue</button>
-                </div>
-                <div style="margin-top:10px;color:var(--text-muted);font-size:0.86rem">
-                    This just fills in your PNR — you'll still need to add flight, passenger and fare details below (or upload a PDF in Advanced mode to auto-extract them).
-                </div>
-                <div style="margin-top:12px;">
-                    <button type="button" id="toggleAdvanced" style="background:none;border:none;color:var(--primary);font-weight:700;cursor:pointer">Show Advanced Options ▾</button>
-                </div>
-            </div>
-
-            <!-- Advanced (original) form — hidden by default -->
-            <div id="advancedSection" class="advanced-hidden">
+            <div id="advancedSection">
 
             <!-- ═══ PDF extraction temporarily disabled ═══ -->
             <div class="card">
@@ -1058,40 +1037,6 @@ document.addEventListener('DOMContentLoaded', () => {
         .catch(err => console.log('Error fetching booking ID:', err));
 });
 
-// ─── Simple UI handlers ──────────────────────────────────
-const toggleBtn = document.getElementById('toggleAdvanced');
-const advSection = document.getElementById('advancedSection');
-if(toggleBtn && advSection){
-    toggleBtn.addEventListener('click', ()=>{
-        const showing = !advSection.classList.toggle('advanced-hidden');
-        toggleBtn.textContent = showing ? 'Hide Advanced Options ▴' : 'Show Advanced Options ▾';
-    });
-}
-
-const simpleGen = document.getElementById('simpleGenerate');
-if(simpleGen){
-    simpleGen.addEventListener('click', ()=>{
-        const val = document.getElementById('simplePnr').value.trim();
-        if(!val){ showToast('Please enter a PNR or booking ref first.'); return; }
-        // copy into existing pnr field (in advanced form)
-        let pnrField = document.querySelector('[name="pnr"]');
-        if(!pnrField){ // create hidden field if missing
-            pnrField = document.createElement('input'); pnrField.type='hidden'; pnrField.name='pnr';
-            document.getElementById('ticketForm').appendChild(pnrField);
-        }
-        pnrField.value = val.toUpperCase();
-        // Reveal the Advanced section so required flight/passenger/fare fields
-        // are visible, focusable, and included in native form validation
-        // (a display:none section is skipped by validation and would silently
-        // submit an incomplete ticket).
-        if(advSection && advSection.classList.contains('advanced-hidden')){
-            advSection.classList.remove('advanced-hidden');
-            toggleBtn.textContent = 'Hide Advanced Options ▴';
-        }
-        showToast('Complete the required flight, passenger and fare details below, then generate.');
-        document.getElementById('flightsContainer').scrollIntoView({behavior:'smooth',block:'start'});
-    });
-}
 </script>
 </body>
 </html>

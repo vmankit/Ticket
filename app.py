@@ -957,23 +957,13 @@ def test_extract():
 
 MAX_BARCODE_BYTES = 4 * 1024 * 1024
 
-# Codes are drawn with ReportLab's built-in Helvetica, which is Latin-1 only,
-# so currencies whose symbol falls outside that range use their ISO code.
-SUPPORTED_CURRENCIES = {
-    "INR": "INR", "USD": "$", "EUR": "€", "GBP": "£",
-    "AED": "AED", "SAR": "SAR", "SGD": "S$", "AUD": "A$",
-    "CAD": "C$", "THB": "THB", "MYR": "RM", "QAR": "QAR",
-}
-
 TICKET_STATUSES = ("Confirmed", "On Hold", "Waitlisted", "Cancelled", "Refunded")
 PASSENGER_TITLES = ("Mr", "Mrs", "Ms", "Mstr", "Dr")
 PASSENGER_TYPES = ("Adult", "Child", "Infant")
 
 
-def format_money(amount, currency="INR"):
-    symbol = SUPPORTED_CURRENCIES.get(currency, currency)
-    separator = "" if symbol in ("$", "€", "£", "S$", "A$", "C$", "RM") else " "
-    return f"{symbol}{separator}{amount:,.2f}"
+def format_money(amount):
+    return f"INR {amount:,.2f}"
 
 
 def save_barcode_upload(upload):
@@ -1114,9 +1104,6 @@ def generate_ticket():
     booking_platform = request.form.get("booking_platform", "Direct")
     is_dummy = request.form.get("is_dummy") == "true"
 
-    currency = (request.form.get("currency", "INR") or "INR").strip().upper()
-    if currency not in SUPPORTED_CURRENCIES:
-        currency = "INR"
     ticket_status = request.form.get("ticket_status", "Confirmed").strip() or "Confirmed"
     if ticket_status not in TICKET_STATUSES:
         ticket_status = "Confirmed"
@@ -1349,9 +1336,9 @@ def generate_ticket():
     if errors:
         cleanup_temp_files(flights)
         return render_validation_errors(errors)
-    base_fare_str = format_money(base_fare, currency)
-    taxes_fees_str = format_money(taxes, currency)
-    total_fare_str = format_money(total_fare, currency)
+    base_fare_str = format_money(base_fare)
+    taxes_fees_str = format_money(taxes)
+    total_fare_str = format_money(total_fare)
 
     # Route summary
     if flights:
@@ -1740,30 +1727,22 @@ def generate_ticket():
                     log.warning("Could not embed barcode image: %s", exc)
             sector_elements.append(Spacer(1, 6))
 
-        # Build seat/meal/baggage display per segment when available
-        seats_html = ""
-        meals_html = ""
-        checkin_html = ""
-        hand_html = ""
-        if pax.get("seats_per_segment"):
-            seats_html = "<br/>".join([f"Flight {idx+1}: {s or 'N/A'}" for idx, s in enumerate(pax.get("seats_per_segment"))])
-        else:
-            seats_html = pax.get("seat", "") or "N/A"
+        # Label each value by segment only when there is more than one, so a
+        # single-segment ticket does not repeat "Flight 1:" in every cell.
+        def per_segment(values, fallback, default):
+            if not values:
+                return escape(fallback or default)
+            if len(values) == 1:
+                return escape(values[0] or default)
+            return "<br/>".join(
+                f"Flight {idx + 1}: {escape(value or default)}"
+                for idx, value in enumerate(values)
+            )
 
-        if pax.get("meals_per_segment"):
-            meals_html = "<br/>".join([f"Flight {idx+1}: {m or 'Not selected'}" for idx, m in enumerate(pax.get("meals_per_segment"))])
-        else:
-            meals_html = pax.get("meal", "Not selected")
-
-        if pax.get("checkin_per_segment"):
-            checkin_html = "<br/>".join([f"Flight {idx+1}: {v or 'Airline Default'}" for idx, v in enumerate(pax.get("checkin_per_segment"))])
-        else:
-            checkin_html = pax.get("checkin_bag", "Airline Default")
-
-        if pax.get("hand_per_segment"):
-            hand_html = "<br/>".join([f"Flight {idx+1}: {v or 'Airline Default'}" for idx, v in enumerate(pax.get("hand_per_segment"))])
-        else:
-            hand_html = pax.get("hand_bag", "Airline Default")
+        seats_html = per_segment(pax.get("seats_per_segment"), pax.get("seat"), "N/A")
+        meals_html = per_segment(pax.get("meals_per_segment"), pax.get("meal"), "Not selected")
+        checkin_html = per_segment(pax.get("checkin_per_segment"), pax.get("checkin_bag"), "Airline Default")
+        hand_html = per_segment(pax.get("hand_per_segment"), pax.get("hand_bag"), "Airline Default")
 
         row = [
             Paragraph(str(pi + 1), cell_style),
@@ -1834,7 +1813,7 @@ def generate_ticket():
         c.setFillColor(DARK); c.setFont("Helvetica-Bold", 10)
         if label == "Discount":
             c.setFillColor(HexColor("#e53935"))
-        c.drawString(lx + 120, current_y, format_money(val, currency))
+        c.drawString(lx + 120, current_y, format_money(val))
         current_y -= 14
 
     # Divider

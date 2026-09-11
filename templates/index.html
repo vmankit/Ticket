@@ -48,6 +48,17 @@
         .airline-logo{width:24px;height:24px;object-fit:contain;border:1px solid var(--border);border-radius:6px;background:#fff;padding:2px}
 
         .separator{height:1px;background:var(--border);margin:8px 0 24px}
+        .link-toggle{background:none;border:none;color:var(--accent);font-weight:700;
+            font-size:.76rem;cursor:pointer;padding:6px 0;margin-bottom:10px;
+            font-family:'Inter',sans-serif;text-align:left}
+        .link-toggle:hover{text-decoration:underline}
+
+        /* Fields the app fills in itself: still editable, but visibly not your job */
+        .auto-tag{margin-left:6px;background:var(--accent-soft);color:var(--accent);
+            border:1px solid rgba(14,148,136,.2);font-size:.58rem;font-weight:800;
+            letter-spacing:.6px;padding:1px 6px;border-radius:999px;text-transform:uppercase}
+        .auto-field{background:var(--surface-alt) !important;color:var(--text-muted) !important}
+        .auto-field:focus{background:#fff !important;color:var(--text) !important}
         .optional-tag{margin-left:auto;background:var(--surface-alt);border:1px solid var(--border);
             color:var(--text-muted);font-size:.6rem;font-weight:700;letter-spacing:.6px;
             padding:2px 8px;border-radius:999px;text-transform:none}
@@ -213,19 +224,6 @@
                     <h2>Booking Information</h2>
                 </div>
                 <div class="card-body">
-                    <div class="section-title"><span class="dot"></span>AGENCY &amp; CONTACT</div>
-                    <div class="form-grid">
-                        <div class="form-group">
-                            <label>Agency Phone</label>
-                            <input type="text" name="agency_phone" placeholder="e.g. +91 7759069422" value="+91 7759069422">
-                        </div>
-                        <div class="form-group">
-                            <label>Agency Email</label>
-                            <input type="email" name="agency_email" placeholder="e.g. ankitrajvm@gmail.com" value="ankitrajvm@gmail.com">
-                        </div>
-                    </div>
-                    
-                    <div class="separator"></div>
                     <div class="section-title"><span class="dot"></span>BOOKING DETAILS</div>
                     <div class="form-grid three-col">
                         <div class="form-group">
@@ -240,12 +238,16 @@
                             </datalist>
                         </div>
                         <div class="form-group">
-                            <label>Booking ID <span class="req">*</span></label>
-                            <input type="text" name="booking_id" id="bookingIdInput" placeholder="Fetching..." style="text-transform:uppercase">
+                            <label>PNR / Booking Ref <span class="req">*</span></label>
+                            <input type="text" name="pnr" placeholder="e.g. ABC123" required
+                                   style="text-transform:uppercase; font-weight: bold; letter-spacing: 1px;">
+                            <div class="helper">The reference from the airline.</div>
                         </div>
                         <div class="form-group">
-                            <label>PNR / Booking Ref <span class="req">*</span></label>
-                            <input type="text" name="pnr" placeholder="e.g. ABC123" required style="text-transform:uppercase; font-weight: bold; letter-spacing: 1px;">
+                            <label>Booking ID <span class="auto-tag">Auto</span></label>
+                            <input type="text" name="booking_id" id="bookingIdInput" class="auto-field"
+                                   placeholder="Fetching..." style="text-transform:uppercase">
+                            <div class="helper">Our own reference. Generated for you.</div>
                         </div>
                         <div class="form-group" style="display: flex; align-items: center; gap: 10px; margin-top: 25px;">
                             <input type="checkbox" name="is_dummy" id="is_dummy" value="true" style="width: auto; height: 18px;">
@@ -362,62 +364,50 @@
                 </div>
                 <div class="card-body">
                     <div class="section-title"><span class="dot"></span>FARE BREAKDOWN</div>
-                    <div class="form-grid three-col" style="margin-bottom:16px">
-                        <div class="form-group">
-                            <label>Currency</label>
-                            <select name="currency" id="currency" onchange="calcTotal()">
-                                <option value="INR">INR — Indian Rupee</option>
-                                <option value="USD">USD — US Dollar</option>
-                                <option value="EUR">EUR — Euro</option>
-                                <option value="GBP">GBP — Pound Sterling</option>
-                                <option value="AED">AED — UAE Dirham</option>
-                                <option value="SAR">SAR — Saudi Riyal</option>
-                                <option value="QAR">QAR — Qatari Riyal</option>
-                                <option value="SGD">SGD — Singapore Dollar</option>
-                                <option value="MYR">MYR — Malaysian Ringgit</option>
-                                <option value="THB">THB — Thai Baht</option>
-                                <option value="AUD">AUD — Australian Dollar</option>
-                                <option value="CAD">CAD — Canadian Dollar</option>
-                            </select>
-                        </div>
-                    </div>
                     <div class="fare-grid" style="grid-template-columns: 1fr 1fr; margin-bottom: 16px;">
                         <div class="form-group">
-                            <label>Base Fare (<span class="cur">INR</span>) <span class="req">*</span></label>
+                            <label>Base Fare (INR) <span class="req">*</span></label>
                             <input type="number" step="0.01" min="0" name="base_fare" id="baseFare" placeholder="e.g. 3500" required oninput="calcTotal()">
                         </div>
                         <div class="form-group">
-                            <label>Airline Taxes & Fees (<span class="cur">INR</span>) <span class="req">*</span></label>
+                            <label>Airline Taxes & Fees (INR) <span class="req">*</span></label>
                             <input type="number" step="0.01" min="0" name="taxes_fees" id="taxesFees" placeholder="e.g. 850" required oninput="calcTotal()">
                         </div>
                         <div class="form-group">
-                            <label>Insurance (<span class="cur">INR</span>)</label>
-                            <input type="number" step="0.01" min="0" name="insurance" id="insurance" value="0" oninput="calcTotal()">
-                        </div>
-                        <div class="form-group">
-                            <label>Meals (<span class="cur">INR</span>)</label>
-                            <input type="number" step="0.01" min="0" name="meals_fee" id="mealsFee" value="0" oninput="calcTotal()">
-                        </div>
-                        <div class="form-group">
-                            <label>Baggage (<span class="cur">INR</span>)</label>
-                            <input type="number" step="0.01" min="0" name="baggage_fee" id="baggageFee" value="0" oninput="calcTotal()">
-                        </div>
-                        <div class="form-group">
-                            <label>Seats (<span class="cur">INR</span>)</label>
-                            <input type="number" step="0.01" min="0" name="seats_fee" id="seatsFee" value="0" oninput="calcTotal()">
-                        </div>
-                        <div class="form-group">
-                            <label>Zero Cancel (<span class="cur">INR</span>)</label>
-                            <input type="number" step="0.01" min="0" name="zero_cancel" id="zeroCancel" value="0" oninput="calcTotal()">
-                        </div>
-                        <div class="form-group">
-                            <label>Discount (<span class="cur">INR</span>)</label>
+                            <label>Discount (INR)</label>
                             <input type="number" step="0.01" min="0" name="discount" id="discount" value="0" oninput="calcTotal()">
                             <div class="helper" id="discountHelper"></div>
                         </div>
                         <div class="form-group">
-                            <label>Total Amount (<span class="cur">INR</span>)</label>
-                            <input type="text" name="total_fare" id="totalFare" placeholder="Auto-calculated" readonly style="font-weight:700;color:var(--primary);font-size:1rem">
+                            <label>Total Amount (INR) <span class="auto-tag">Auto</span></label>
+                            <input type="text" name="total_fare" id="totalFare" class="auto-field" placeholder="Auto-calculated" readonly style="font-weight:700;font-size:1rem">
+                        </div>
+                    </div>
+
+                    <!-- Almost always zero, so kept out of the way. -->
+                    <button type="button" class="link-toggle" onclick="toggleAncillaries()">
+                        <span id="ancillariesLabel">Add extra charges (insurance, meals, baggage, seats)</span>
+                    </button>
+                    <div class="form-grid three-col" id="ancillaries" hidden>
+                        <div class="form-group">
+                            <label>Insurance (INR)</label>
+                            <input type="number" step="0.01" min="0" name="insurance" id="insurance" value="0" oninput="calcTotal()">
+                        </div>
+                        <div class="form-group">
+                            <label>Meals (INR)</label>
+                            <input type="number" step="0.01" min="0" name="meals_fee" id="mealsFee" value="0" oninput="calcTotal()">
+                        </div>
+                        <div class="form-group">
+                            <label>Baggage (INR)</label>
+                            <input type="number" step="0.01" min="0" name="baggage_fee" id="baggageFee" value="0" oninput="calcTotal()">
+                        </div>
+                        <div class="form-group">
+                            <label>Seats (INR)</label>
+                            <input type="number" step="0.01" min="0" name="seats_fee" id="seatsFee" value="0" oninput="calcTotal()">
+                        </div>
+                        <div class="form-group">
+                            <label>Zero Cancel (INR)</label>
+                            <input type="number" step="0.01" min="0" name="zero_cancel" id="zeroCancel" value="0" oninput="calcTotal()">
                         </div>
                     </div>
                     
@@ -484,24 +474,15 @@ function csrfToken(){
 function showToast(msg,dur=3000){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),dur)}
 
 // ─── Fare calculation ─────────────────────────────────────
-const CURRENCY_SYMBOLS={INR:'INR',USD:'$',EUR:'€',GBP:'£',AED:'AED',SAR:'SAR',
-    QAR:'QAR',SGD:'S$',MYR:'RM',THB:'THB',AUD:'A$',CAD:'C$'};
-
 function calcTotal(){
     const val=id=>parseFloat(document.getElementById(id).value)||0;
     const base=val('baseFare'), tax=val('taxesFees'), disc=val('discount');
     const extras=val('insurance')+val('mealsFee')+val('baggageFee')+val('seatsFee')+val('zeroCancel');
     const total=base+tax+extras-disc;
 
-    const code=document.getElementById('currency').value;
-    const symbol=CURRENCY_SYMBOLS[code]||code;
-    const gap=['$','€','£','S$','A$','C$','RM'].includes(symbol)?'':' ';
-    const locale=code==='INR'?'en-IN':'en-US';
-
-    document.querySelectorAll('.cur').forEach(el=>{el.textContent=code});
     document.getElementById('totalFare').value=total.toFixed(2);
     document.getElementById('fareTotalDisplay').textContent=
-        symbol+gap+total.toLocaleString(locale,{minimumFractionDigits:2,maximumFractionDigits:2});
+        'INR '+total.toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2});
 
     // Mirror the server rule so the problem is visible before submitting.
     const helper=document.getElementById('discountHelper');
@@ -526,10 +507,41 @@ function toggleCard() {
 function formatTime12(t){if(!t)return'';const[h,m]=t.split(':').map(Number);return(h%12||12)+':'+String(m).padStart(2,'0')+(h>=12?' PM':' AM')}
 function calcDur(depId,arrId,durId){
     const d=document.getElementById(depId).value,a=document.getElementById(arrId).value;
-    if(d&&a){const[dh,dm]=d.split(':').map(Number),[ah,am]=a.split(':').map(Number);let td=dh*60+dm,ta=ah*60+am;if(ta<td)ta+=1440;const diff=ta-td;document.getElementById(durId).value=Math.floor(diff/60)+'h '+diff%60+'m';}
+    if(d&&a){
+        const[dh,dm]=d.split(':').map(Number),[ah,am]=a.split(':').map(Number);
+        let td=dh*60+dm,ta=ah*60+am;
+        if(ta<td)ta+=1440;
+        const diff=ta-td;
+        const text=Math.floor(diff/60)+'h '+diff%60+'m';
+        document.getElementById(durId).value=text;
+        const label=document.getElementById(durId+'_label')||document.getElementById(durId.replace('fdur_','fdur_label_'));
+        if(label)label.textContent='Duration: '+text+(ta>=1440?' (next day)':'');
+    }
+}
+
+function toggleAncillaries(){
+    const box=document.getElementById('ancillaries');
+    box.hidden=!box.hidden;
+    document.getElementById('ancillariesLabel').textContent=box.hidden
+        ? 'Add extra charges (insurance, meals, baggage, seats)'
+        : 'Hide extra charges';
+}
+
+function toggleExtras(i){
+    const box=document.getElementById('extras_'+i);
+    const label=document.getElementById('extras_label_'+i);
+    box.hidden=!box.hidden;
+    label.textContent=box.hidden?'More options':'Fewer options';
 }
 
 // ─── Airport autocomplete ─────────────────────────────────
+// City and airline are derived from the code and flight number, so their
+// inputs stay hidden until detection fails and the user must supply them.
+function setCityVisible(cityId,show){
+    const wrap=document.getElementById(cityId.replace(/^(f|t)city_/,'$1city_wrap_'));
+    if(wrap)wrap.hidden=!show;
+}
+
 let searchTimer=null;
 function setupAC(inputId,listId,helperId,cityId){
     const input=document.getElementById(inputId),list=document.getElementById(listId),
@@ -537,7 +549,7 @@ function setupAC(inputId,listId,helperId,cityId){
     if(!input)return;
     input.addEventListener('input',function(){
         const v=this.value.trim();this.value=v.toUpperCase();
-        if(!v){list.classList.remove('visible');list.innerHTML='';helper.textContent='';cityInput.value='';return}
+        if(!v){list.classList.remove('visible');list.innerHTML='';helper.textContent='';cityInput.value='';setCityVisible(cityId,false);return}
         clearTimeout(searchTimer);
         searchTimer=setTimeout(async()=>{
             const res=await fetch('/api/search-airports?q='+encodeURIComponent(v.toUpperCase()));
@@ -546,12 +558,19 @@ function setupAC(inputId,listId,helperId,cityId){
                 data.forEach(item=>{
                     const div=document.createElement('div');div.className='autocomplete-item';
                     div.innerHTML=`<span class="ac-code">${item.code}</span><div class="ac-info"><div class="ac-city">${item.city}</div><div class="ac-airport">${item.airport}</div></div><span class="ac-country">${item.country}</span>`;
-                    div.onclick=()=>{input.value=item.code;cityInput.value=item.city;helper.textContent='✓ '+item.airport;helper.className='helper detected';list.classList.remove('visible')};
+                    div.onclick=()=>{input.value=item.code;cityInput.value=item.city;helper.textContent='✓ '+item.city+' — '+item.airport;helper.className='helper detected';list.classList.remove('visible');setCityVisible(cityId,false)};
                     list.appendChild(div);
                 });
-                if(v.length===3){const ex=data.find(r=>r.code===v.toUpperCase());if(ex){cityInput.value=ex.city;helper.textContent='✓ '+ex.airport;helper.className='helper detected';list.classList.remove('visible');return}}
+                if(v.length===3){const ex=data.find(r=>r.code===v.toUpperCase());if(ex){cityInput.value=ex.city;helper.textContent='✓ '+ex.city+' — '+ex.airport;helper.className='helper detected';list.classList.remove('visible');setCityVisible(cityId,false);return}}
                 list.classList.add('visible');
-            } else {list.classList.remove('visible');if(v.length>=3){helper.textContent='Not found — enter city manually';helper.className='helper';cityInput.readOnly=false}}
+            } else {
+                list.classList.remove('visible');
+                if(v.length>=3){
+                    helper.textContent='Airport not in the database — enter the city below.';
+                    helper.className='helper';
+                    setCityVisible(cityId,true);
+                }
+            }
         },150);
     });
     document.addEventListener('click',e=>{if(!input.contains(e.target)&&!list.contains(e.target))list.classList.remove('visible')});
@@ -589,14 +608,10 @@ function addFlight(){
                 <input type="text" name="flight_${i}_flight_no" id="fno_${i}" placeholder="e.g. 6E 2341" required autocomplete="off" oninput="detectAirline(this,${i})">
                 <div class="helper" id="al_detect_${i}"></div>
             </div>
-            <div class="form-group">
+            <!-- Filled from the flight number; shown only when we cannot detect it. -->
+            <div class="form-group derived" id="al_wrap_${i}" hidden>
                 <label>Airline</label>
-                <input type="text" name="flight_${i}_airline" id="al_${i}" placeholder="Auto-detected">
-            </div>
-            <div class="form-group">
-                <label>Segment PNR <span style="font-size: 0.7rem; color: var(--text-muted);">(Optional)</span></label>
-                <input type="text" name="flight_${i}_segment_pnr" id="pnr_${i}" placeholder="If different from main PNR" autocomplete="off">
-                <div class="helper" style="font-size: 0.65rem; color: var(--text-muted);">For connecting flights with separate PNRs</div>
+                <input type="text" name="flight_${i}_airline" id="al_${i}" placeholder="Enter airline name">
             </div>
         </div>
 
@@ -607,19 +622,21 @@ function addFlight(){
                 <div class="autocomplete-list" id="fc_list_${i}"></div>
                 <div class="helper" id="fc_h_${i}"></div>
             </div>
-            <div class="form-group">
-                <label>From — City</label>
-                <input type="text" name="flight_${i}_from_city" id="fcity_${i}" placeholder="Auto-filled">
-            </div>
             <div class="form-group autocomplete-wrapper">
                 <label>To — Code <span class="req">*</span></label>
                 <input type="text" name="flight_${i}_to_code" id="tc_${i}" placeholder="e.g. BOM" required autocomplete="off">
                 <div class="autocomplete-list" id="tc_list_${i}"></div>
                 <div class="helper" id="tc_h_${i}"></div>
             </div>
-            <div class="form-group">
+            <!-- City names come from the airport database; only shown when a
+                 code is not recognised and must be filled in by hand. -->
+            <div class="form-group derived" id="fcity_wrap_${i}" hidden>
+                <label>From — City</label>
+                <input type="text" name="flight_${i}_from_city" id="fcity_${i}" placeholder="Enter city">
+            </div>
+            <div class="form-group derived" id="tcity_wrap_${i}" hidden>
                 <label>To — City</label>
-                <input type="text" name="flight_${i}_to_city" id="tcity_${i}" placeholder="Auto-filled">
+                <input type="text" name="flight_${i}_to_city" id="tcity_${i}" placeholder="Enter city">
             </div>
         </div>
 
@@ -635,14 +652,8 @@ function addFlight(){
             <div class="form-group">
                 <label>Arrival <span class="req">*</span></label>
                 <input type="time" name="flight_${i}_arr_time_raw" id="farr_${i}" required onchange="calcDur('fdep_${i}','farr_${i}','fdur_${i}')">
+                <div class="helper" id="fdur_label_${i}"></div>
             </div>
-            <div class="form-group">
-                <label>Duration</label>
-                <input type="text" name="flight_${i}_duration" id="fdur_${i}" placeholder="Auto" readonly>
-            </div>
-        </div>
-
-        <div class="form-grid" style="margin-bottom:0; align-items: flex-end;">
             <div class="form-group">
                 <label>Class</label>
                 <select name="flight_${i}_class">
@@ -652,28 +663,27 @@ function addFlight(){
                     <option value="First Class">First Class</option>
                 </select>
             </div>
+        </div>
+        <input type="hidden" name="flight_${i}_duration" id="fdur_${i}">
+
+        <button type="button" class="link-toggle" onclick="toggleExtras(${i})">
+            <span id="extras_label_${i}">More options</span>
+        </button>
+        <div class="form-grid" id="extras_${i}" hidden style="margin-bottom:0">
+            <div class="form-group">
+                <label>Segment PNR</label>
+                <input type="text" name="flight_${i}_segment_pnr" id="pnr_${i}" placeholder="Only if different from main PNR" autocomplete="off">
+            </div>
             <div class="form-group" style="padding-bottom: 2px;">
                 <label>Barcode Image</label>
                 <input type="file" name="flight_${i}_barcode" accept="image/*" style="padding: 6px 10px; font-size: 0.7rem;">
             </div>
         </div>
 
-        <div class="section-title" style="margin-top:12px; margin-bottom:8px;"><span class="dot"></span>SEAT, MEAL & BAGGAGE FOR THIS FLIGHT</div>
-        <div class="form-grid four-col" style="margin-bottom:0;">
-            <div class="form-group">
-                <label>Seat</label>
-                <input type="text" name="flight_${i}_seat" placeholder="e.g. 12A" value="Not selected">
-            </div>
-            <div class="form-group">
-                <label>Meal</label>
-                <select name="flight_${i}_meal">
-                    <option value="Not selected" selected>Not selected</option>
-                    <option value="Veg Meal">Veg Meal</option>
-                    <option value="Non-Veg Meal">Non-Veg Meal</option>
-                    <option value="Jain Meal">Jain Meal</option>
-                    <option value="Special Meal">Special Meal</option>
-                </select>
-            </div>
+        <!-- Baggage is part of the fare, so it belongs to the flight. Seat and
+             meal differ per traveller and are asked once, under each passenger. -->
+        <div class="section-title" style="margin-top:12px; margin-bottom:8px;"><span class="dot"></span>BAGGAGE ALLOWANCE FOR THIS FLIGHT</div>
+        <div class="form-grid" style="margin-bottom:0;">
             <div class="form-group">
                 <label>Check-in Baggage</label>
                 <select name="flight_${i}_checkin_bag">
@@ -712,24 +722,14 @@ function addFlight(){
     setupAC('fc_'+i,'fc_list_'+i,'fc_h_'+i,'fcity_'+i);
     setupAC('tc_'+i,'tc_list_'+i,'tc_h_'+i,'tcity_'+i);
 
-    // Attach listeners so changes to flight-level seat/meal/baggage propagate to passengers
-    setTimeout(()=>{
-        const seatInput = document.querySelector(`#flight_seg_${i} [name="flight_${i}_seat"]`);
-        const mealSelect = document.querySelector(`#flight_seg_${i} [name="flight_${i}_meal"]`);
-        const checkinSelect = document.querySelector(`#flight_seg_${i} [name="flight_${i}_checkin_bag"]`);
-        const handSelect = document.querySelector(`#flight_seg_${i} [name="flight_${i}_hand_bag"]`);
-        if(seatInput) seatInput.addEventListener('input', updatePassengerSegmentFields);
-        if(mealSelect) mealSelect.addEventListener('change', updatePassengerSegmentFields);
-        if(checkinSelect) checkinSelect.addEventListener('change', updatePassengerSegmentFields);
-        if(handSelect) handSelect.addEventListener('change', updatePassengerSegmentFields);
-        // Initial sync
-        updatePassengerSegmentFields();
-    }, 0);
+    // Each passenger gets a seat/meal row per segment, so rebuild them when
+    // the number of flights changes.
+    setTimeout(updatePassengerSegmentFields, 0);
 
     document.getElementById('flightCount').value=flightIdx;
 }
 
-// Propagate flight-level seat/meal/baggage values into passenger segment fields
+// Give every passenger one seat/meal row per flight segment.
 function updatePassengerSegmentFields(){
     const flightCount = flightIdx;
     document.querySelectorAll('.pax-row').forEach((row, paxIndex)=>{
@@ -737,24 +737,15 @@ function updatePassengerSegmentFields(){
         if(!segmentsContainer) return;
         segmentsContainer.innerHTML = '';
         for(let fi=0; fi<flightCount; fi++){
-            const flightSeatEl = document.querySelector(`[name="flight_${fi}_seat"]`);
-            const flightMealEl = document.querySelector(`[name="flight_${fi}_meal"]`);
-            const flightCheckinEl = document.querySelector(`[name="flight_${fi}_checkin_bag"]`);
-            const flightHandEl = document.querySelector(`[name="flight_${fi}_hand_bag"]`);
-
-            const flightSeat = flightSeatEl?flightSeatEl.value.trim():'';
-            const flightMeal = flightMealEl?flightMealEl.value:'Not selected';
-            const flightCheckin = flightCheckinEl?flightCheckinEl.value:'';
-            const flightHand = flightHandEl?flightHandEl.value:'';
-
             const segDiv = document.createElement('div');
             segDiv.style.display='grid';
-            segDiv.style.gridTemplateColumns='1fr 1fr 1fr 1fr';
+            segDiv.style.gridTemplateColumns='1fr 1fr';
             segDiv.style.gap='10px';
             segDiv.style.alignItems='end';
+            const label = flightCount > 1 ? `Flight ${fi+1} Seat` : 'Seat';
             segDiv.innerHTML = `
                 <div class="form-group">
-                    <label>Flight ${fi+1} Seat</label>
+                    <label>${label}</label>
                     <input type="text" name="pax_${paxIndex}_seat_${fi}" placeholder="e.g. 12A">
                 </div>
                 <div class="form-group">
@@ -767,59 +758,9 @@ function updatePassengerSegmentFields(){
                         <option value="Special Meal">Special Meal</option>
                     </select>
                 </div>
-                <div class="form-group">
-                    <label>Check-in Bag</label>
-                    <select name="pax_${paxIndex}_checkin_bag_${fi}">
-                        <option value="">Airline Default</option>
-                        <option value="No Baggage">No Baggage</option>
-                        <option value="15 KG (1 Piece)">15 KG (1 Piece)</option>
-                        <option value="20 KG (1 Piece)">20 KG (1 Piece)</option>
-                        <option value="30 KG (1 Piece)">30 KG (1 Piece)</option>
-                    </select>
-                </div>
-                <div class="form-group">
-                    <label>Hand Bag</label>
-                    <select name="pax_${paxIndex}_hand_bag_${fi}">
-                        <option value="">Airline Default</option>
-                        <option value="No Baggage">No Baggage</option>
-                        <option value="7 KG (1 Piece)">7 KG (1 Piece)</option>
-                        <option value="10 KG (1 Piece)">10 KG (1 Piece)</option>
-                    </select>
-                </div>
             `;
 
-            // Append and then set defaults / disabled state if flight-level value exists
             segmentsContainer.appendChild(segDiv);
-            const paxSeatInput = segmentsContainer.querySelector(`[name="pax_${paxIndex}_seat_${fi}"]`);
-            const paxMealSelect = segmentsContainer.querySelector(`[name="pax_${paxIndex}_meal_${fi}"]`);
-            const paxCheckinSelect = segmentsContainer.querySelector(`[name="pax_${paxIndex}_checkin_bag_${fi}"]`);
-            const paxHandSelect = segmentsContainer.querySelector(`[name="pax_${paxIndex}_hand_bag_${fi}"]`);
-
-            // If passenger provided a specific per-segment value (from previous fill), preserve it
-            const existingSeat = document.querySelector(`[name="pax_${paxIndex}_seat_${fi}"]`);
-            if(existingSeat && existingSeat.dataset && existingSeat.dataset.preset){
-                // already preset
-            }
-
-            if(flightSeat && flightSeat.toLowerCase()!=='not selected'){
-                paxSeatInput.value = flightSeat;
-                paxSeatInput.disabled = true;
-                paxSeatInput.style.opacity = 0.8;
-            } else {
-                // leave editable and blank unless passenger-level single seat exists
-                const singlePaxSeat = document.querySelector(`[name="pax_${paxIndex}_seat"]`);
-                if(singlePaxSeat && singlePaxSeat.value && singlePaxSeat.value!=='Not selected'){
-                    paxSeatInput.value = singlePaxSeat.value;
-                }
-                paxSeatInput.disabled = false;
-            }
-
-            if(flightMeal && flightMeal!=='Not selected'){
-                paxMealSelect.value = flightMeal;
-                paxMealSelect.disabled = true;
-            }
-            if(flightCheckin){ paxCheckinSelect.value = flightCheckin; paxCheckinSelect.disabled = true; }
-            if(flightHand){ paxHandSelect.value = flightHand; paxHandSelect.disabled = true; }
         }
     });
 }
@@ -845,14 +786,20 @@ function detectAirline(input,idx){
     const prefix=candidates.find(code=>AIRLINES[code]);
     const helper=document.getElementById('al_detect_'+idx);
     const alInput=document.getElementById('al_'+idx);
+    const alWrap=document.getElementById('al_wrap_'+idx);
     if(prefix){
         const info=typeof AIRLINES[prefix]==='string'?{name:AIRLINES[prefix],iata:prefix}:AIRLINES[prefix];
         alInput.value=info.name;
         const codeLabel=info.iata&&info.iata!==prefix?`${prefix} / ${info.iata}`:prefix;
         helper.innerHTML=`<span class="airline-match">${info.logo?`<img class="airline-logo" src="${info.logo}" alt="${info.name} logo" onerror="this.style.display='none'">`:''}<span>✓ ${info.name} (${codeLabel})</span></span>`;
         helper.className='helper detected';
+        if(alWrap)alWrap.hidden=true;
     }
-    else{helper.textContent='';helper.className='helper'}
+    else{
+        helper.textContent=v?'Airline not recognised — enter the name below.':'';
+        helper.className='helper';
+        if(alWrap)alWrap.hidden=!v;
+    }
 }
 
 // ─── Add Passenger ────────────────────────────────────────
@@ -890,8 +837,9 @@ function addPassenger(){
                 </select>
             </div>
             <div class="form-group" style="grid-column:1/-1">
-                <label>Ticket Number</label>
-                <input type="text" name="pax_${i}_ticket_no" placeholder="Auto-generated if empty">
+                <label>Ticket Number <span class="auto-tag">Auto</span></label>
+                <input type="text" name="pax_${i}_ticket_no" class="auto-field"
+                       placeholder="Generated automatically — leave blank">
             </div>
         </div>
 

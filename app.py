@@ -5,6 +5,7 @@ from reportlab.platypus import Table, TableStyle, Paragraph, Spacer, Image
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.pdfgen import canvas
 from reportlab.graphics.barcode.code128 import Code128
+import base64
 import io
 import json
 import logging
@@ -690,6 +691,13 @@ def whatsapp_graph_request(path, payload=None, method="POST", content_type="appl
             raise RuntimeError(f"WhatsApp API error {exc.code}: {error_text}")
         except (json.JSONDecodeError, TypeError):
             raise RuntimeError(f"WhatsApp API error {exc.code}: {body[:200]}")
+    except urllib.error.URLError as exc:
+        # DNS failure, refused connection or timeout — the most common real
+        # failures. Surface them like the HTTP errors instead of raw urllib.
+        raise RuntimeError(
+            f"Could not reach the WhatsApp API ({exc.reason}). "
+            "Check the server's network connection and try again."
+        )
 
 
 def send_pdf_to_whatsapp(pdf_bytes, filename, to_phone, caption):
@@ -1997,20 +2005,27 @@ def generate_ticket():
         p{color:#667085;line-height:1.55}
         .bad{display:inline-block;background:#fff1f0;color:#c24135;padding:6px 10px;border-radius:999px;font-weight:800;font-size:12px;margin-bottom:14px}
         pre{white-space:pre-wrap;background:#f6f8fb;border:1px solid #d9e0ea;border-radius:8px;padding:12px;color:#162033;font-size:12px}
-        a{display:inline-block;margin-top:14px;background:#0f2742;color:#fff;text-decoration:none;padding:12px 18px;border-radius:10px;font-weight:800}
+        a{display:inline-block;margin-top:14px;margin-right:10px;background:#0f2742;color:#fff;text-decoration:none;padding:12px 18px;border-radius:10px;font-weight:800}
+        a.primary{background:#0e9488}
     </style>
 </head>
 <body>
     <div class="box">
         <div class="bad">WHATSAPP NOT SENT</div>
         <h1>Ticket generated, but WhatsApp failed</h1>
-        <p>The ticket PDF was generated, but the WhatsApp delivery failed. Check the error below.</p>
+        <p>The ticket itself is fine — download it below and send it manually,
+           or fix the problem and generate again.</p>
         <pre>{{ error }}</pre>
+        <a class="primary" href="data:application/pdf;base64,{{ pdf_b64 }}" download="{{ filename }}">Download the ticket</a>
         <a href="/">Back to generator</a>
     </div>
 </body>
 </html>
-            """, error=str(e)), 500
+            """,
+                error=str(e),
+                pdf_b64=base64.b64encode(pdf_bytes).decode("ascii"),
+                filename=dl_name,
+            ), 500
 
     return send_file(buffer, as_attachment=True, download_name=dl_name, mimetype="application/pdf")
 

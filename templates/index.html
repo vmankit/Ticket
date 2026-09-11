@@ -476,6 +476,11 @@ let paxIdx = 0;
 
 fetch('/api/airlines').then(r=>r.json()).then(d=>{AIRLINES=d});
 
+function csrfToken(){
+    const field=document.querySelector('[name="csrf_token"]');
+    return field?field.value:'';
+}
+
 function showToast(msg,dur=3000){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),dur)}
 
 // ─── Fare calculation ─────────────────────────────────────
@@ -1089,7 +1094,13 @@ if(extractBtn){
         const form=new FormData();
         form.append('ticket_pdf',file);
         try{
-            const res=await fetch('/api/parse-ticket',{method:'POST',body:form});
+            // CSRFProtect guards every POST, so the token must ride along or
+            // the upload is rejected before it reaches the parser.
+            const res=await fetch('/api/parse-ticket',{
+                method:'POST',
+                body:form,
+                headers:{'X-CSRFToken':csrfToken()}
+            });
             const data=await res.json();
             if(!res.ok){
                 console.error('Backend error:',data);

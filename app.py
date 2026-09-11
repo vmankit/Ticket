@@ -34,6 +34,12 @@ except ImportError:
 from airports_data import AIRPORTS_DB
 from excel_tracker import get_next_booking_id, save_to_excel
 from utils import generate_qr, generate_ticket_number
+from ticket_parsing import (
+    looks_like_own_ticket,
+    normalize_text,
+    parse_agency_ticket,
+    parse_own_ticket,
+)
 from validation import (
     parse_money,
     validate_booking,
@@ -297,18 +303,41 @@ def parse_date_str(value):
             return datetime(year, month, day).strftime("%Y-%m-%d")
         except ValueError:
             return ""
-    word_match = re.search(r"\b(\d{1,2})\s*(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\s*(\d{2,4})\b", value.upper())
-    if word_match:
-        day = int(word_match.group(1))
-        month = MONTH_LOOKUP.get(word_match.group(2), 0)
-        year = int(word_match.group(3))
+    upper = value.upper()
+    month_names = "JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC"
+    # Separators vary across issuers: "11 Jul 2026", "11 Jul, 2026",
+    # "11 July 2026", "11-Jul-2026" and the month-first "Jul 11, 2026".
+    # (?!\d) stops a 4-digit year being split into a day and a 2-digit year,
+    # which turned "32 Jan 2026" into 2026-01-20 instead of rejecting it.
+    patterns = (
+        rf"\b(\d{{1,2}})(?!\d)[\s\-.]*({month_names})[A-Z]*[\s\-.,]*(\d{{2,4}})\b",
+        rf"\b({month_names})[A-Z]*[\s\-.]+(\d{{1,2}})(?!\d)[\s\-.,]+(\d{{2,4}})\b",
+    )
+    for index, pattern in enumerate(patterns):
+        match = re.search(pattern, upper)
+        if not match:
+            continue
+        if index == 0:
+            day, month_abbr, year = match.group(1), match.group(2), match.group(3)
+        else:
+            month_abbr, day, year = match.group(1), match.group(2), match.group(3)
+        month = MONTH_LOOKUP.get(month_abbr, 0)
+        year = int(year)
         if year < 100:
             year += 2000
         try:
-            return datetime(year, month, day).strftime("%Y-%m-%d")
+            return datetime(year, month, int(day)).strftime("%Y-%m-%d")
         except ValueError:
-            return ""
+            continue
     return ""
+
+
+def to_12_hour(raw):
+    """"14:05" -> "2:05 PM". Returns "" for anything unparseable."""
+    try:
+        return datetime.strptime((raw or "").strip(), "%H:%M").strftime("%-I:%M %p")
+    except ValueError:
+        return ""
 
 
 def find_first_date(value):
@@ -346,27 +375,29 @@ def detect_platform(text_upper, filename=""):
 
 
 def extract_ticket_fields(text, filename=""):
-    text = text or ""
+    # Typographic dashes and currency signs are common in issuer PDFs and stop
+    # every ASCII pattern below from matching.
+    text = normalize_text(text or "")
     text_upper = text.upper()
     lines = [line.strip() for line in text.splitlines() if line.strip()]
 
     platform = detect_platform(text_upper, filename)
 
-    company_name = (COMPANY.get("name", "") or "").upper()
-    if (company_name and company_name in text_upper and not platform) or "ANKIT TRAVELS" in text_upper:
-        return {
-            "booking_platform": "",
-            "pnr": "",
-            "booking_id": "",
-            "booking_date": "",
-            "customer_email": "",
-            "customer_phone": "",
-            "base_fare": "",
-            "taxes_fees": "",
-            "total_fare": "",
-            "flights": [],
-            "passengers": [],
-        }
+    # Tickets this app generated have a known layout, so read them directly
+    # rather than putting them through the heuristics meant for OTA formats.
+    if looks_like_own_ticket(text_upper):
+        own = parse_own_ticket(text)
+        if own and (own.get("pnr") or own.get("flights")):
+            own["booking_platform"] = own.get("booking_platform") or platform or "Direct/Walk-in"
+            return own
+
+    # Agency-issued tickets carry no OTA branding but follow a recognisable
+    # flight-table shape, so try that before the OTA heuristics give up.
+    if not platform:
+        agency = parse_agency_ticket(text)
+        if agency and agency.get("flights") and (agency.get("pnr") or agency.get("booking_id")):
+            agency["booking_platform"] = agency.get("booking_platform") or "Direct/Walk-in"
+            return agency
 
     if not platform and not any(token in text_upper for token in ["BOOKING", "TICKET", "PNR", "TRAVELLER", "TRAVELER", "BOARDING"]):
         return {
@@ -526,6 +557,11 @@ def extract_ticket_fields(text, filename=""):
                     "flight_no": f"{flight_line.group(1)} {flight_line.group(2)}",
                     "airline": AIRLINES.get(extract_airline_code(f"{flight_line.group(1)} {flight_line.group(2)}"), ""),
                 }
+                # The travel date usually sits on the row under the times.
+                window = "\n".join(lines[idx:idx + 3])
+                seg_date = find_first_date(window)
+                if seg_date:
+                    seg["date"] = seg_date
                 segments.append(seg)
                 continue
         if not any(k in upper for k in ["FROM", "TO", "DEPART", "ARRIV", "FLIGHT", "SECTOR", "ROUTE", "PNR"]):
@@ -559,31 +595,41 @@ def extract_ticket_fields(text, filename=""):
     if not platform and not pnr and not booking_id and len(segments) > 6:
         segments = []
 
-    # Remove exact duplicate segments
+    # Collapse segments describing the same leg. The flight number is
+    # deliberately not part of the key: the same leg is often matched twice,
+    # once with a flight number and once without, and keying on it kept both.
     if segments:
-        seen = set()
-        deduped = []
+        merged = {}
+        order = []
         for seg in segments:
             key = (
                 seg.get("from_code", ""),
                 seg.get("to_code", ""),
                 seg.get("dep_time_raw", ""),
                 seg.get("arr_time_raw", ""),
-                seg.get("flight_no", ""),
             )
-            if key in seen:
-                continue
-            seen.add(key)
-            deduped.append(seg)
-        segments = deduped
+            if key not in merged:
+                merged[key] = dict(seg)
+                order.append(key)
+            else:
+                # Keep whichever copy carries more detail.
+                for field, value in seg.items():
+                    if value and not merged[key].get(field):
+                        merged[key][field] = value
+        segments = [merged[k] for k in order]
 
     if not segments and flight_numbers:
         segments = [{} for _ in flight_numbers]
 
-    for idx, seg in enumerate(segments):
-        if idx < len(flight_numbers):
-            seg["flight_no"] = flight_numbers[idx]
-            seg["airline"] = AIRLINES.get(extract_airline_code(flight_numbers[idx]), "")
+    # Only attach loose flight numbers when the counts line up. Otherwise the
+    # extras are stray text that merely looks like a flight code (an address
+    # or a time), and pairing them with a leg invents a flight that is not on
+    # the ticket.
+    if len(flight_numbers) == len(segments):
+        for seg, flight_no in zip(segments, flight_numbers):
+            if not seg.get("flight_no"):
+                seg["flight_no"] = flight_no
+                seg["airline"] = AIRLINES.get(extract_airline_code(flight_no), "")
 
     return {
         "booking_platform": platform,
@@ -871,11 +917,24 @@ def parse_ticket():
     
     extracted = extract_ticket_fields(text, filename=filename)
     
-    if not extracted.get("pnr") and not extracted.get("booking_id"):
+    if not extracted.get("pnr") and not extracted.get("booking_id") and not extracted.get("flights"):
         if not extracted.get("booking_platform"):
-            # No platform detected, try to find at least some booking info
-            log.warning("Could not identify a recognised booking platform.")
-            return jsonify({"error": "Could not recognize ticket format (MakeMyTrip, Paytm, Cleartrip, Goibibo not detected). Please fill details manually. You can also upload a ticket from supported platforms.", "detected_platform": extracted.get("booking_platform", "unknown"), "raw_text_available": True}), 422
+            # Distinguish "this isn't a ticket" from "it is, but unreadable" —
+            # they need different things from the user.
+            ticket_markers = ("PNR", "FLIGHT", "PASSENGER", "BOARDING", "AIRLINE", "DEPART")
+            hits = sum(1 for marker in ticket_markers if marker in text.upper())
+            if hits < 2:
+                log.warning("Upload does not look like a ticket: %s", filename)
+                return jsonify({
+                    "error": "This file does not look like a flight ticket. "
+                             "Upload the e-ticket PDF you received from the airline or booking site.",
+                }), 422
+            log.warning("Ticket recognised but no booking details could be read.")
+            return jsonify({
+                "error": "This looks like a ticket, but the booking details could not be read "
+                         "automatically. Please fill the form manually.",
+                "raw_text_available": True,
+            }), 422
         else:
             # Platform detected but no booking ID/PNR found
             log.info("Platform %s detected but booking ID/PNR missing", extracted.get("booking_platform"))
@@ -1101,8 +1160,11 @@ def generate_ticket():
         travel_date = request.form.get(f"{prefix}date", "")
         dep_time_raw = request.form.get(f"{prefix}dep_time_raw", "")
         arr_time_raw = request.form.get(f"{prefix}arr_time_raw", "")
-        dep_time = request.form.get(f"{prefix}dep_time", "")
-        arr_time = request.form.get(f"{prefix}arr_time", "")
+        # The 12-hour fields are filled by JavaScript on submit. Derive them
+        # from the raw 24-hour values when they are missing, otherwise a
+        # client without JS produces a ticket with no flight times on it.
+        dep_time = request.form.get(f"{prefix}dep_time", "") or to_12_hour(dep_time_raw)
+        arr_time = request.form.get(f"{prefix}arr_time", "") or to_12_hour(arr_time_raw)
         duration = request.form.get(f"{prefix}duration", "")
         travel_class = request.form.get(f"{prefix}class", "Economy")
         seat = request.form.get(f"{prefix}seat", "")

@@ -12,6 +12,7 @@ import os
 import re
 import tempfile
 import uuid
+from html import escape
 import urllib.error
 import urllib.request
 from datetime import datetime, timedelta
@@ -889,6 +890,24 @@ def test_extract():
 
 MAX_BARCODE_BYTES = 4 * 1024 * 1024
 
+# Codes are drawn with ReportLab's built-in Helvetica, which is Latin-1 only,
+# so currencies whose symbol falls outside that range use their ISO code.
+SUPPORTED_CURRENCIES = {
+    "INR": "INR", "USD": "$", "EUR": "€", "GBP": "£",
+    "AED": "AED", "SAR": "SAR", "SGD": "S$", "AUD": "A$",
+    "CAD": "C$", "THB": "THB", "MYR": "RM", "QAR": "QAR",
+}
+
+TICKET_STATUSES = ("Confirmed", "On Hold", "Waitlisted", "Cancelled", "Refunded")
+PASSENGER_TITLES = ("Mr", "Mrs", "Ms", "Mstr", "Dr")
+PASSENGER_TYPES = ("Adult", "Child", "Infant")
+
+
+def format_money(amount, currency="INR"):
+    symbol = SUPPORTED_CURRENCIES.get(currency, currency)
+    separator = "" if symbol in ("$", "€", "£", "S$", "A$", "C$", "RM") else " "
+    return f"{symbol}{separator}{amount:,.2f}"
+
 
 def save_barcode_upload(upload):
     """Persist an uploaded barcode image to a temp file, or return None.
@@ -1027,6 +1046,18 @@ def generate_ticket():
     card_last_4 = request.form.get("card_last_4", "")
     booking_platform = request.form.get("booking_platform", "Direct")
     is_dummy = request.form.get("is_dummy") == "true"
+
+    currency = (request.form.get("currency", "INR") or "INR").strip().upper()
+    if currency not in SUPPORTED_CURRENCIES:
+        currency = "INR"
+    ticket_status = request.form.get("ticket_status", "Confirmed").strip() or "Confirmed"
+    if ticket_status not in TICKET_STATUSES:
+        ticket_status = "Confirmed"
+    trip_type = request.form.get("trip_type", "One Way").strip() or "One Way"
+
+    # GST / company billing (used on Indian B2B invoices)
+    gst_company = request.form.get("gst_company", "").strip()
+    gstin = request.form.get("gstin", "").strip().upper()
 
     # Format booking date
     try:
@@ -1201,8 +1232,13 @@ def generate_ticket():
         single_ck = request.form.get(f"{prefix}checkin_bag", "")
         single_hand = request.form.get(f"{prefix}hand_bag", "")
 
+        pax_title = request.form.get(f"{prefix}title", "").strip()
+        pax_type = request.form.get(f"{prefix}type", "Adult").strip() or "Adult"
+
         passengers.append({
             "name": request.form.get(f"{prefix}name", ""),
+            "title": pax_title if pax_title in PASSENGER_TITLES else "",
+            "pax_type": pax_type if pax_type in PASSENGER_TYPES else "Adult",
             "passport": request.form.get(f"{prefix}passport", ""),
             "dob": request.form.get(f"{prefix}dob", ""),
             "doe": request.form.get(f"{prefix}doe", ""),
@@ -1243,9 +1279,9 @@ def generate_ticket():
     if errors:
         cleanup_temp_files(flights)
         return render_validation_errors(errors)
-    base_fare_str = f"INR {base_fare:,.2f}"
-    taxes_fees_str = f"INR {taxes:,.2f}"
-    total_fare_str = f"INR {total_fare:,.2f}"
+    base_fare_str = format_money(base_fare, currency)
+    taxes_fees_str = format_money(taxes, currency)
+    total_fare_str = format_money(total_fare, currency)
 
     # Route summary
     if flights:
@@ -1454,7 +1490,16 @@ def generate_ticket():
     c.setFillColor(PRIMARY)
     c.setFont("Helvetica-Bold", 9.5)
     c.drawString(margin + 15, y + section_h - 18, "BOOKING SUMMARY")
-    draw_pill(margin + usable_w - 100, y + section_h - 23, "CONFIRMED", GREEN)
+    status_colors = {
+        "Confirmed": GREEN, "On Hold": GOLD, "Waitlisted": GOLD,
+        "Cancelled": DANGER, "Refunded": GRAY,
+    }
+    status_label = ticket_status.upper()
+    status_width = c.stringWidth(status_label, "Helvetica-Bold", 7) + 18
+    draw_pill(
+        margin + usable_w - status_width - 15, y + section_h - 23,
+        status_label, status_colors.get(ticket_status, GREEN),
+    )
 
     col_w = usable_w / 3
     labels = [
@@ -1598,13 +1643,18 @@ def generate_ticket():
 
     for pi, pax in enumerate(passengers):
         # Build Name + Passport details
-        name_html = pax["name"]
-        if pax["passport"] or pax["dob"] or pax["doe"]:
-            name_html += "<br/><font color='#616161' size='6'>"
-            if pax["passport"]: name_html += f"Passport: {pax['passport']}<br/>"
-            if pax["dob"]: name_html += f"DOB: {pax['dob']}<br/>"
-            if pax["doe"]: name_html += f"DOE: {pax['doe']}<br/>"
-            name_html += "</font>"
+        # Escaped because Paragraph parses this as markup: a stray & or <
+        # in a passport number would otherwise break PDF rendering.
+        display_name = " ".join(part for part in (pax.get("title"), pax["name"]) if part)
+        name_html = escape(display_name)
+        details = []
+        if pax.get("pax_type") and pax["pax_type"] != "Adult":
+            details.append(f"Type: {pax['pax_type']}")
+        if pax["passport"]: details.append(f"Passport: {escape(pax['passport'])}")
+        if pax["dob"]: details.append(f"DOB: {escape(pax['dob'])}")
+        if pax["doe"]: details.append(f"DOE: {escape(pax['doe'])}")
+        if details:
+            name_html += "<br/><font color='#616161' size='6'>" + "<br/>".join(details) + "</font>"
             
         # Build Sector + Barcode array
         sector_elements = []
@@ -1697,7 +1747,7 @@ def generate_ticket():
     ]
     active_fare_items = [(lbl, val) for lbl, val in fare_items if val != 0 or lbl in ["Base Fare", "Airline Taxes & Fees"]]
     
-    fare_h = 45 + (len(active_fare_items) * 14)
+    fare_h = 45 + (len(active_fare_items) * 14) + (14 if gstin else 0)
     if y - fare_h < 50:
         c.showPage(); y = height - 50
     y -= fare_h
@@ -1714,13 +1764,19 @@ def generate_ticket():
         c.setFillColor(DARK); c.setFont("Helvetica-Bold", 10)
         if label == "Discount":
             c.setFillColor(HexColor("#e53935"))
-        c.drawString(lx + 120, current_y, f"INR {val:,.2f}")
+        c.drawString(lx + 120, current_y, format_money(val, currency))
         current_y -= 14
 
     # Divider
     c.setStrokeColor(BORDER); c.setLineWidth(0.5)
     c.line(lx, current_y + 6, lx + 200, current_y + 6)
     
+    if gstin:
+        c.setFillColor(GRAY); c.setFont("Helvetica", 7)
+        gst_line = f"GSTIN: {gstin}" + (f"  |  {gst_company}" if gst_company else "")
+        c.drawString(lx, current_y - 20, gst_line[:70])
+        current_y -= 14
+
     c.setFillColor(PRIMARY); c.setFont("Helvetica-Bold", 9)
     c.drawString(lx, current_y - 8, "Total Amount")
     c.setFillColor(ACCENT); c.setFont("Helvetica-Bold", 12)
@@ -1839,6 +1895,7 @@ def generate_ticket():
     
     # ── Save Tracking to Excel ──────────────────────────────────
     lead_pax = passengers[0]["name"] if passengers else "Unknown"
+    gst_note = f"GST: {gst_company} ({gstin})" if gstin else ""
     flight_nos = ", ".join(f["flight_no"] for f in flights)
     travel_date_val = flights[0]["date"] if flights else ""
     dep_time_val = flights[0]["dep_time"] if flights else ""
@@ -1859,8 +1916,8 @@ def generate_ticket():
         payment_method,
         fare_type,
         refund_status,
-        "Confirmed",
-        ""
+        ticket_status,
+        gst_note,
     ]
     if not is_dummy:
         try:

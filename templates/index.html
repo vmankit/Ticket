@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Bharat Horizon Travels — E-Ticket Generator</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230e9488'/%3E%3Ctext x='16' y='22' font-family='Arial,sans-serif' font-size='15' font-weight='bold' fill='white' text-anchor='middle'%3EBT%3C/text%3E%3C/svg%3E">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <style>
         *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
@@ -47,6 +48,12 @@
         .airline-logo{width:24px;height:24px;object-fit:contain;border:1px solid var(--border);border-radius:6px;background:#fff;padding:2px}
 
         .separator{height:1px;background:var(--border);margin:8px 0 24px}
+        .optional-tag{margin-left:auto;background:var(--surface-alt);border:1px solid var(--border);
+            color:var(--text-muted);font-size:.6rem;font-weight:700;letter-spacing:.6px;
+            padding:2px 8px;border-radius:999px;text-transform:none}
+        .form-group select{appearance:none;background-image:url("data:image/svg+xml;charset=UTF-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%23667085' d='M1 1l5 5 5-5'/%3E%3C/svg%3E");
+            background-repeat:no-repeat;background-position:right 12px center;padding-right:32px;cursor:pointer}
+        .form-group input:invalid:not(:placeholder-shown){border-color:var(--danger)}
 
         /* Flight segment */
         .flight-segment{border:1px solid var(--border);border-radius:10px;padding:20px;margin-bottom:16px;position:relative;background:var(--surface-alt);transition:box-shadow .2s,border-color .2s}
@@ -110,7 +117,31 @@
         .btn-whatsapp{background:#128c7e;box-shadow:0 12px 28px rgba(18,140,126,.24)}
         .btn-whatsapp:hover{background:#0f766b;box-shadow:0 16px 34px rgba(18,140,126,.3)}
 
-        .footer{text-align:center;padding:24px;color:var(--text-muted);font-size:.72rem;letter-spacing:.35px}
+        /* Sticky action bar — the form is long, so the running total and the
+           generate buttons stay reachable instead of living at the bottom. */
+        .action-bar{position:sticky;bottom:12px;z-index:90;margin-top:22px;
+            padding:12px 18px;border-radius:12px;
+            background:rgba(255,255,255,.94);backdrop-filter:blur(14px);
+            border:1px solid var(--border);box-shadow:0 14px 40px rgba(15,39,66,.16)}
+        .action-bar-inner{max-width:1080px;margin:0 auto;display:flex;align-items:center;
+            justify-content:space-between;gap:16px;flex-wrap:wrap}
+        .action-total{display:flex;flex-direction:column;line-height:1.25}
+        .action-total .label{font-size:.66rem;font-weight:800;letter-spacing:1.2px;
+            text-transform:uppercase;color:var(--text-muted)}
+        .action-total .value{font-size:1.45rem;font-weight:800;color:var(--primary);
+            font-variant-numeric:tabular-nums}
+        .action-total .value.over{color:var(--danger)}
+        .action-buttons{display:flex;gap:10px;flex-wrap:wrap}
+        .action-bar .btn-generate{padding:13px 26px;font-size:.88rem}
+
+        /* Collapsible cards keep a very long form navigable */
+        .card-header{cursor:pointer;user-select:none}
+        .card-header .chevron{margin-left:auto;color:var(--text-muted);font-size:.8rem;
+            transition:transform .2s;flex-shrink:0}
+        .card.collapsed .chevron{transform:rotate(-90deg)}
+        .card.collapsed .card-body{display:none}
+
+        .footer{text-align:center;padding:24px 24px 12px;color:var(--text-muted);font-size:.72rem;letter-spacing:.35px}
         .toast{position:fixed;bottom:30px;right:30px;background:var(--primary);color:#fff;padding:14px 24px;border-radius:10px;font-size:.85rem;font-weight:600;box-shadow:0 14px 34px rgba(15,39,66,.26);transform:translateY(100px);opacity:0;transition:all .4s cubic-bezier(.16,1,.3,1);z-index:1000}
         .toast.show{transform:translateY(0);opacity:1}
         .spinner{display:inline-block;width:18px;height:18px;border:2.5px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite;margin-right:8px;vertical-align:middle}
@@ -125,6 +156,10 @@
             .header .db-badge{white-space:normal}
             .fare-total{align-items:flex-start;flex-direction:column;gap:6px}
             .upload-actions{flex-wrap:wrap}
+            .action-bar-inner{gap:10px}
+            .action-total .value{font-size:1.2rem}
+            .action-buttons{width:100%}
+            .action-bar .btn-generate{flex:1;padding:12px 14px;font-size:.8rem}
             .submit-section .btn-generate{width:100%}
         }
 
@@ -237,6 +272,39 @@
                                 <option value="RETAIL FARE">RETAIL FARE</option>
                             </select>
                         </div>
+                        <div class="form-group">
+                            <label>Trip Type</label>
+                            <select name="trip_type">
+                                <option value="One Way">One Way</option>
+                                <option value="Round Trip">Round Trip</option>
+                                <option value="Multi-City">Multi-City</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Ticket Status</label>
+                            <select name="ticket_status" id="ticketStatus">
+                                <option value="Confirmed">Confirmed</option>
+                                <option value="On Hold">On Hold</option>
+                                <option value="Waitlisted">Waitlisted</option>
+                                <option value="Cancelled">Cancelled</option>
+                                <option value="Refunded">Refunded</option>
+                            </select>
+                            <div class="helper">Shown as the status badge on the ticket.</div>
+                        </div>
+                    </div>
+
+                    <div class="separator"></div>
+                    <div class="section-title"><span class="dot"></span>GST / COMPANY BILLING <span class="optional-tag">Optional</span></div>
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label>Company Name</label>
+                            <input type="text" name="gst_company" placeholder="e.g. Acme Pvt Ltd">
+                        </div>
+                        <div class="form-group">
+                            <label>GSTIN</label>
+                            <input type="text" name="gstin" placeholder="e.g. 29ABCDE1234F1Z5" maxlength="15" style="text-transform:uppercase">
+                            <div class="helper">Printed on the ticket and saved to the tracker.</div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -294,41 +362,61 @@
                 </div>
                 <div class="card-body">
                     <div class="section-title"><span class="dot"></span>FARE BREAKDOWN</div>
+                    <div class="form-grid three-col" style="margin-bottom:16px">
+                        <div class="form-group">
+                            <label>Currency</label>
+                            <select name="currency" id="currency" onchange="calcTotal()">
+                                <option value="INR">INR — Indian Rupee</option>
+                                <option value="USD">USD — US Dollar</option>
+                                <option value="EUR">EUR — Euro</option>
+                                <option value="GBP">GBP — Pound Sterling</option>
+                                <option value="AED">AED — UAE Dirham</option>
+                                <option value="SAR">SAR — Saudi Riyal</option>
+                                <option value="QAR">QAR — Qatari Riyal</option>
+                                <option value="SGD">SGD — Singapore Dollar</option>
+                                <option value="MYR">MYR — Malaysian Ringgit</option>
+                                <option value="THB">THB — Thai Baht</option>
+                                <option value="AUD">AUD — Australian Dollar</option>
+                                <option value="CAD">CAD — Canadian Dollar</option>
+                            </select>
+                        </div>
+                    </div>
                     <div class="fare-grid" style="grid-template-columns: 1fr 1fr; margin-bottom: 16px;">
                         <div class="form-group">
-                            <label>Base Fare (INR) <span class="req">*</span></label>
-                            <input type="number" step="0.01" name="base_fare" id="baseFare" placeholder="e.g. 3500" required oninput="calcTotal()">
+                            <label>Base Fare (<span class="cur">INR</span>) <span class="req">*</span></label>
+                            <input type="number" step="0.01" min="0" name="base_fare" id="baseFare" placeholder="e.g. 3500" required oninput="calcTotal()">
                         </div>
                         <div class="form-group">
-                            <label>Airline Taxes & Fees (INR) <span class="req">*</span></label>
-                            <input type="number" step="0.01" name="taxes_fees" id="taxesFees" placeholder="e.g. 850" required oninput="calcTotal()">
+                            <label>Airline Taxes & Fees (<span class="cur">INR</span>) <span class="req">*</span></label>
+                            <input type="number" step="0.01" min="0" name="taxes_fees" id="taxesFees" placeholder="e.g. 850" required oninput="calcTotal()">
                         </div>
                         <div class="form-group">
-                            <label>Insurance (INR)</label>
-                            <input type="number" step="0.01" name="insurance" id="insurance" value="0" oninput="calcTotal()">
+                            <label>Insurance (<span class="cur">INR</span>)</label>
+                            <input type="number" step="0.01" min="0" name="insurance" id="insurance" value="0" oninput="calcTotal()">
                         </div>
                         <div class="form-group">
-                            <label>Meals (INR)</label>
-                            <input type="number" step="0.01" name="meals_fee" id="mealsFee" value="0" oninput="calcTotal()">
+                            <label>Meals (<span class="cur">INR</span>)</label>
+                            <input type="number" step="0.01" min="0" name="meals_fee" id="mealsFee" value="0" oninput="calcTotal()">
                         </div>
                         <div class="form-group">
-                            <label>Baggage (INR)</label>
-                            <input type="number" step="0.01" name="baggage_fee" id="baggageFee" value="0" oninput="calcTotal()">
+                            <label>Baggage (<span class="cur">INR</span>)</label>
+                            <input type="number" step="0.01" min="0" name="baggage_fee" id="baggageFee" value="0" oninput="calcTotal()">
                         </div>
                         <div class="form-group">
-                            <label>Seats (INR)</label>
-                            <input type="number" step="0.01" name="seats_fee" id="seatsFee" value="0" oninput="calcTotal()">
+                            <label>Seats (<span class="cur">INR</span>)</label>
+                            <input type="number" step="0.01" min="0" name="seats_fee" id="seatsFee" value="0" oninput="calcTotal()">
                         </div>
                         <div class="form-group">
-                            <label>Zero Cancel (INR)</label>
-                            <input type="number" step="0.01" name="zero_cancel" id="zeroCancel" value="0" oninput="calcTotal()">
+                            <label>Zero Cancel (<span class="cur">INR</span>)</label>
+                            <input type="number" step="0.01" min="0" name="zero_cancel" id="zeroCancel" value="0" oninput="calcTotal()">
                         </div>
                         <div class="form-group">
-                            <label>Discount (INR)</label>
-                            <input type="number" step="0.01" name="discount" id="discount" value="0" oninput="calcTotal()">
+                            <label>Discount (<span class="cur">INR</span>)</label>
+                            <input type="number" step="0.01" min="0" name="discount" id="discount" value="0" oninput="calcTotal()">
+                            <div class="helper" id="discountHelper"></div>
                         </div>
                         <div class="form-group">
-                            <label>Total Amount (INR)</label>
+                            <label>Total Amount (<span class="cur">INR</span>)</label>
                             <input type="text" name="total_fare" id="totalFare" placeholder="Auto-calculated" readonly style="font-weight:700;color:var(--primary);font-size:1rem">
                         </div>
                     </div>
@@ -353,22 +441,26 @@
                         </div>
                     </div>
 
-                    <div class="fare-total" style="margin-top: 16px;">
-                        <span class="label">Total Payable Amount</span>
-                        <span class="value" id="fareTotalDisplay">INR 0</span>
-                    </div>
                 </div>
             </div>
+            </div>
 
-            <!-- Submit -->
-            <div class="submit-section">
-                <input type="hidden" name="delivery_action" id="deliveryAction" value="download">
-                <button type="submit" class="btn-generate" id="submitBtn">
-                    Generate E-Ticket PDF
-                </button>
-                <button type="submit" class="btn-generate btn-whatsapp" id="whatsappBtn" onclick="document.getElementById('deliveryAction').value='whatsapp'">
-                    Generate & Send WhatsApp
-                </button>
+            <!-- Always-visible total and actions, so neither is 5000px away -->
+            <div class="action-bar">
+                <div class="action-bar-inner">
+                    <div class="action-total">
+                        <span class="label">Total Payable</span>
+                        <span class="value" id="fareTotalDisplay">INR 0.00</span>
+                    </div>
+                    <input type="hidden" name="delivery_action" id="deliveryAction" value="download">
+                    <div class="action-buttons">
+                        <button type="submit" class="btn-generate" id="submitBtn">Generate E-Ticket PDF</button>
+                        <button type="submit" class="btn-generate btn-whatsapp" id="whatsappBtn"
+                                onclick="document.getElementById('deliveryAction').value='whatsapp'">
+                            Send on WhatsApp
+                        </button>
+                    </div>
+                </div>
             </div>
         </form>
     </div>
@@ -387,18 +479,31 @@ fetch('/api/airlines').then(r=>r.json()).then(d=>{AIRLINES=d});
 function showToast(msg,dur=3000){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),dur)}
 
 // ─── Fare calculation ─────────────────────────────────────
+const CURRENCY_SYMBOLS={INR:'INR',USD:'$',EUR:'€',GBP:'£',AED:'AED',SAR:'SAR',
+    QAR:'QAR',SGD:'S$',MYR:'RM',THB:'THB',AUD:'A$',CAD:'C$'};
+
 function calcTotal(){
-    const base=parseFloat(document.getElementById('baseFare').value)||0;
-    const tax=parseFloat(document.getElementById('taxesFees').value)||0;
-    const ins=parseFloat(document.getElementById('insurance').value)||0;
-    const meals=parseFloat(document.getElementById('mealsFee').value)||0;
-    const bag=parseFloat(document.getElementById('baggageFee').value)||0;
-    const seat=parseFloat(document.getElementById('seatsFee').value)||0;
-    const zc=parseFloat(document.getElementById('zeroCancel').value)||0;
-    const disc=parseFloat(document.getElementById('discount').value)||0;
-    const total=base+tax+ins+meals+bag+seat+zc-disc;
-    document.getElementById('totalFare').value=total;
-    document.getElementById('fareTotalDisplay').textContent='INR '+total.toLocaleString('en-IN');
+    const val=id=>parseFloat(document.getElementById(id).value)||0;
+    const base=val('baseFare'), tax=val('taxesFees'), disc=val('discount');
+    const extras=val('insurance')+val('mealsFee')+val('baggageFee')+val('seatsFee')+val('zeroCancel');
+    const total=base+tax+extras-disc;
+
+    const code=document.getElementById('currency').value;
+    const symbol=CURRENCY_SYMBOLS[code]||code;
+    const gap=['$','€','£','S$','A$','C$','RM'].includes(symbol)?'':' ';
+    const locale=code==='INR'?'en-IN':'en-US';
+
+    document.querySelectorAll('.cur').forEach(el=>{el.textContent=code});
+    document.getElementById('totalFare').value=total.toFixed(2);
+    document.getElementById('fareTotalDisplay').textContent=
+        symbol+gap+total.toLocaleString(locale,{minimumFractionDigits:2,maximumFractionDigits:2});
+
+    // Mirror the server rule so the problem is visible before submitting.
+    const helper=document.getElementById('discountHelper');
+    const tooLarge=total<0;
+    helper.textContent=tooLarge?'Discount exceeds the rest of the fare.':'';
+    helper.style.color=tooLarge?'var(--danger)':'';
+    document.getElementById('fareTotalDisplay').classList.toggle('over', tooLarge);
 }
 
 function toggleCard() {
@@ -473,7 +578,7 @@ function addFlight(){
         <span class="seg-label">FLIGHT ${i+1}</span>
         ${i>0?'<button type="button" class="remove-flight" onclick="removeFlight('+i+')" title="Remove">✕</button>':''}
 
-        <div class="form-grid" style="margin-top:10px; grid-template-columns: 1fr 1fr 1fr;">
+        <div class="form-grid three-col" style="margin-top:10px;">
             <div class="form-group">
                 <label>Flight Number <span class="req">*</span></label>
                 <input type="text" name="flight_${i}_flight_no" id="fno_${i}" placeholder="e.g. 6E 2341" required autocomplete="off" oninput="detectAirline(this,${i})">
@@ -532,8 +637,8 @@ function addFlight(){
             </div>
         </div>
 
-        <div class="form-grid" style="margin-bottom:0; display: flex; align-items: flex-end; gap: 20px;">
-            <div class="form-group" style="flex:1;">
+        <div class="form-grid" style="margin-bottom:0; align-items: flex-end;">
+            <div class="form-group">
                 <label>Class</label>
                 <select name="flight_${i}_class">
                     <option value="Economy">Economy</option>
@@ -542,7 +647,7 @@ function addFlight(){
                     <option value="First Class">First Class</option>
                 </select>
             </div>
-            <div class="form-group" style="flex:1; padding-bottom: 2px;">
+            <div class="form-group" style="padding-bottom: 2px;">
                 <label>Barcode Image</label>
                 <input type="file" name="flight_${i}_barcode" accept="image/*" style="padding: 6px 10px; font-size: 0.7rem;">
             </div>
@@ -755,12 +860,31 @@ function addPassenger(){
         <span class="pax-label">PASSENGER ${i+1}</span>
         ${i>0?'<button type="button" class="remove-pax" onclick="removePassenger('+i+')" title="Remove">✕</button>':''}
 
-        <div class="form-grid" style="margin-top:8px">
+        <div class="form-grid four-col" style="margin-top:8px">
             <div class="form-group">
+                <label>Title</label>
+                <select name="pax_${i}_title">
+                    <option value="Mr">Mr</option>
+                    <option value="Mrs">Mrs</option>
+                    <option value="Ms">Ms</option>
+                    <option value="Mstr">Mstr</option>
+                    <option value="Dr">Dr</option>
+                </select>
+            </div>
+            <div class="form-group" style="grid-column:span 2">
                 <label>Passenger Name <span class="req">*</span></label>
-                <input type="text" name="pax_${i}_name" placeholder="As on ID proof" required>
+                <input type="text" name="pax_${i}_name" placeholder="As on ID proof" required
+                       pattern="[A-Za-z][A-Za-z .'\\-]*" title="Letters, spaces, apostrophes, hyphens and periods only">
             </div>
             <div class="form-group">
+                <label>Passenger Type</label>
+                <select name="pax_${i}_type">
+                    <option value="Adult">Adult (12+)</option>
+                    <option value="Child">Child (2-11)</option>
+                    <option value="Infant">Infant (&lt;2)</option>
+                </select>
+            </div>
+            <div class="form-group" style="grid-column:1/-1">
                 <label>Ticket Number</label>
                 <input type="text" name="pax_${i}_ticket_no" placeholder="Auto-generated if empty">
             </div>
@@ -1020,8 +1144,25 @@ document.getElementById('ticketForm').addEventListener('submit',function(e){
     }, 3500);
 });
 
+// ─── Collapsible sections ─────────────────────────────────
+function setupCollapsibleCards(){
+    document.querySelectorAll('.card > .card-header').forEach(header=>{
+        if(!header.querySelector('.chevron')){
+            const chevron=document.createElement('span');
+            chevron.className='chevron';
+            chevron.textContent='▾';
+            header.appendChild(chevron);
+        }
+        header.addEventListener('click', ()=>{
+            header.parentElement.classList.toggle('collapsed');
+        });
+    });
+}
+
 // ─── Init ─────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
+    setupCollapsibleCards();
+    calcTotal();
     document.getElementById('booking_date').value=new Date().toISOString().split('T')[0];
     addFlight();     // First flight
     addPassenger();  // First passenger

@@ -41,6 +41,7 @@ from ticket_parsing import (
     ocr_pdf_bytes,
     parse_agency_ticket,
     parse_own_ticket,
+    parse_stacked_itinerary,
 )
 from validation import (
     parse_money,
@@ -434,6 +435,8 @@ def extract_ticket_fields(text, filename=""):
     PNR_NOISE = {
         "ETICKET", "TICKET", "NUMBER", "STATUS", "AIRLINE", "FLIGHT", "BOOKING",
         "DETAILS", "SECTOR", "SEATNO", "REFERENCE", "CONFIRM", "CONFIRMED",
+        # Passenger-type words sit in the same row as the PNR on many tickets.
+        "ADULT", "CHILD", "INFANT", "ADULTS", "SENIOR", "ECONOMY", "BUSINESS",
     }
 
     def looks_like_pnr(value):
@@ -570,8 +573,14 @@ def extract_ticket_fields(text, filename=""):
                     if title_name not in [p["name"] for p in passengers]:
                         passengers.append({"name": title_name})
 
+    # Booking references are often UUIDs, and a chunk like "...-fd86-..." looks
+    # exactly like a flight number, so drop them before scanning.
+    flight_scan_text = re.sub(
+        r"\b[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}\b",
+        " ", text_upper)
+
     flight_numbers = []
-    for match in re.finditer(r"\b([A-Z]{2,3})\s?-?\s?(\d{2,4})\b", text_upper):
+    for match in re.finditer(r"\b([A-Z]{2,3})\s?-?\s?(\d{2,4})\b", flight_scan_text):
         code = match.group(1)
         number = match.group(2)
         iata = AIRLINE_ALIASES.get(code, code)
@@ -686,6 +695,15 @@ def extract_ticket_fields(text, filename=""):
                     if value and not merged[key].get(field):
                         merged[key][field] = value
         segments = [merged[k] for k in order]
+
+    # Compact tickets stack the route, times and date on bare lines with no
+    # labels, so nothing above matches them.
+    if not any(seg.get("from_code") for seg in segments):
+        stacked = parse_stacked_itinerary(
+            text, is_valid_airport_code, lambda code: code in airline_payload())
+        if stacked:
+            segments = stacked
+            flight_numbers = []
 
     if not segments and flight_numbers:
         segments = [{} for _ in flight_numbers]

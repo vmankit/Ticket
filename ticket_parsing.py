@@ -138,6 +138,74 @@ AGENCY_TIMES_RE = re.compile(
     r"(\d{1,2}:[0-5]\d)\s+(\d{1,2}-[A-Za-z]{3}-\d{4})\s+(\d{1,2}:[0-5]\d)\s+(\d{1,2}-[A-Za-z]{3}-\d{4})")
 
 
+STACKED_FLIGHT_RE = re.compile(r"\b([A-Z0-9]{2})\s?-?\s?(\d{2,4})\b")
+
+
+def parse_stacked_itinerary(text, is_airport, is_airline):
+    """Read compact tickets that stack each field on its own line.
+
+        AI AIR INDIA - AI 422 ECONOMY
+        ATQ DEL
+        13:10 14:15
+        14 Sep 2026 14 Sep 2026
+
+    There are no "from"/"to" labels to anchor on, so a flight-number line is
+    located first and the rows beneath it supplied the route, times and date.
+    `is_airport` is injected to avoid importing the airport database here.
+    """
+    # A booking UUID contains chunks like "-fd86-" that read as a flight number.
+    cleaned = re.sub(
+        r"\b[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}\b",
+        " ", normalize_text(text))
+    lines = [l.strip() for l in cleaned.splitlines() if l.strip()]
+    flights = []
+
+    for idx, line in enumerate(lines):
+        upper = line.upper()
+        if not re.search(r"\b(FLIGHT|ITINERARY)\b", upper) and "·" not in line and "-" not in line:
+            continue
+        # Require a real airline code, or a postal address ("Sector 6, HSR
+        # Layout") supplies both a "flight number" and two airport codes.
+        match = next((m for m in STACKED_FLIGHT_RE.finditer(upper) if is_airline(m.group(1))), None)
+        if not match:
+            continue
+        flight_no = f"{match.group(1)} {match.group(2)}"
+
+        window = lines[idx + 1:idx + 7]
+        route = times = date = None
+        for candidate in window:
+            candidate_upper = candidate.upper()
+            if STACKED_FLIGHT_RE.search(candidate_upper) and re.search(r"\b(FLIGHT|·)\b", candidate):
+                break  # the next segment starts here
+            if route is None:
+                codes = [c for c in re.findall(r"\b[A-Z]{3}\b", candidate_upper) if is_airport(c)]
+                if len(codes) >= 2 and codes[0] != codes[1]:
+                    route = (codes[0], codes[1])
+                    continue
+            if times is None:
+                found = re.findall(r"\b([0-2]?\d:[0-5]\d)\b", candidate)
+                if len(found) >= 2:
+                    times = (found[0].zfill(5), found[1].zfill(5))
+                    continue
+            if date is None:
+                found = _find_date(candidate)
+                if found:
+                    date = found
+
+        if not route:
+            continue
+        segment = {"flight_no": flight_no, "from_code": route[0], "to_code": route[1]}
+        if times:
+            segment["dep_time_raw"], segment["arr_time_raw"] = times
+        if date:
+            segment["date"] = date
+        if not any(f["from_code"] == segment["from_code"]
+                   and f["to_code"] == segment["to_code"] for f in flights):
+            flights.append(segment)
+
+    return flights
+
+
 def parse_agency_ticket(text):
     """Parse an agency-issued ticket (not one of the big OTAs).
 

@@ -5,6 +5,7 @@ rules, and one accent only for the status. The information is the design —
 large airport codes and times carry the page, so nothing else needs to shout.
 """
 
+import io
 import re
 from html import escape
 
@@ -12,6 +13,7 @@ from reportlab.graphics.barcode.code128 import Code128
 from reportlab.lib.colors import HexColor, white
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle
+from reportlab.lib.utils import ImageReader
 from reportlab.pdfgen import canvas as pdfcanvas
 from reportlab.platypus import Paragraph
 
@@ -126,8 +128,11 @@ def _fmt(value, fallback="—"):
 def draw_header(t, *, company, pnr, booking_id, status):
     """Wordmark and booking reference on the left, PNR set large on the right."""
     top = t.y
+    # Initials from the company name rather than a hardcoded pair, which was
+    # still "AT" from a previous trading name.
+    initials = "".join(word[0] for word in re.findall(r"[A-Za-z]+", company["name"]))[:2].upper()
     t.rounded(MARGIN, top - 30, 30, 30, 8, fill=INK, stroke=None)
-    t.text(MARGIN + 15, top - 19, "AT", size=11, font="Helvetica-Bold",
+    t.text(MARGIN + 15, top - 19, initials or "BH", size=11, font="Helvetica-Bold",
            color=white, align="center")
 
     t.text(MARGIN + 40, top - 14, company["name"].upper(), size=12.5,
@@ -235,10 +240,25 @@ def draw_flight(t, flight, index, total):
 
     code = (flight.get("airline_code") or "")[:2].upper() or "--"
     badge_y = top - head_h + 9
-    t.c.setFillColor(INK)
-    t.c.circle(MARGIN + 24, badge_y + 8, 8, stroke=0, fill=1)
-    t.text(MARGIN + 24, badge_y + 5.4, code, size=6.4, font="Helvetica-Bold",
-           color=white, align="center")
+    logo = flight.get("logo_bytes")
+    if logo:
+        # Real carrier logo when it could be fetched; the code badge otherwise.
+        try:
+            t.c.saveState()
+            t.c.setFillColor(white)
+            t.c.setStrokeColor(LINE)
+            t.c.setLineWidth(0.6)
+            t.c.roundRect(MARGIN + 15, badge_y, 18, 18, 5, stroke=1, fill=1)
+            t.c.drawImage(ImageReader(io.BytesIO(logo)), MARGIN + 16.5, badge_y + 1.5,
+                          width=15, height=15, mask="auto", preserveAspectRatio=True)
+            t.c.restoreState()
+        except Exception:
+            logo = None
+    if not logo:
+        t.c.setFillColor(INK)
+        t.c.circle(MARGIN + 24, badge_y + 8, 8, stroke=0, fill=1)
+        t.text(MARGIN + 24, badge_y + 5.4, code, size=6.4, font="Helvetica-Bold",
+               color=white, align="center")
 
     airline = (flight.get("airline") or "").upper()
     title = f"{airline}  ·  {flight.get('flight_no', '')}".strip(" ·")
@@ -381,18 +401,21 @@ def draw_passengers(t, passengers, flights):
         top_y = t.y - 6
         for (x, ratio, html, bold, color, size) in cells:
             cell(x, top_y, table_w * ratio, html, bold=bold, color=color, size=size)
-        base = top_y - row_h + 8
 
         # Scale the bars to the column so the code cannot run over the meal
         # text to its left.
         payload = re.sub(r"[^A-Za-z0-9\-]", "", pax.get("ticket_no") or pax.get("name") or "TICKET")[:18]
         try:
+            bar_h = 15
             bar_width = 0.5
-            barcode = Code128(payload, barHeight=13, barWidth=bar_width, humanReadable=False)
+            barcode = Code128(payload, barHeight=bar_h, barWidth=bar_width, humanReadable=False)
             if barcode.width > barcode_width:
                 bar_width *= barcode_width / barcode.width
-                barcode = Code128(payload, barHeight=13, barWidth=bar_width, humanReadable=False)
-            barcode.drawOn(t.c, barcode_right - barcode.width, base + 1)
+                barcode = Code128(payload, barHeight=bar_h, barWidth=bar_width, humanReadable=False)
+            # Centred in the row; it previously sat on the bottom edge and
+            # drifted further down as the other cells grew taller.
+            barcode.drawOn(t.c, barcode_right - barcode.width,
+                           top_y - (row_h + bar_h) / 2 + 4)
         except Exception:
             pass
 
@@ -403,28 +426,31 @@ def draw_passengers(t, passengers, flights):
 
 
 def draw_fares(t, items, total_str, *, payment, gst_company, gstin):
-    t.space(80)
+    """Breakdown and total share one right-aligned column.
+
+    The total used to sit in its own block on the far right, reading as a
+    separate figure from the breakdown it totals.
+    """
+    t.space(90)
     left = MARGIN + 14
+    right = PAGE_W - MARGIN - 14
     t.y -= 2
 
     for label, value in items:
         t.text(left, t.y, label, size=8, color=MUTED)
-        t.text(left + 190, t.y, value, size=8.6, font="Helvetica-Bold",
-               color=INK, align="right")
+        t.text(right, t.y, value, size=8.6, font="Helvetica-Bold", color=INK, align="right")
         t.y -= 14
 
-    t.rule(left, t.y + 5, 190)
-    t.y -= 10
-    t.text(left, t.y, "Total Amount", size=8.6, font="Helvetica-Bold", color=INK)
-    t.text(left + 190, t.y, total_str, size=9.4, font="Helvetica-Bold", color=INK, align="right")
+    t.rule(left, t.y + 6, right - left)
+    t.y -= 14
 
-    right = PAGE_W - MARGIN - 14
-    label = "AMOUNT PAID"
-    width = t.c.stringWidth(label, "Helvetica-Bold", 7.2) + len(label) * 1.5
-    t.tracked(right - width - 4, t.y + 26, label)
-    t.text(right, t.y + 4, total_str, size=19, font="Helvetica-Bold", color=INK, align="right")
+    # Same baseline as the amount, so the two extract as one line: the label
+    # and value were landing on separate lines and the total could not be read
+    # back off our own ticket.
+    t.tracked(left, t.y, "Amount Paid")
+    t.text(right, t.y, total_str, size=17, font="Helvetica-Bold", color=INK, align="right")
 
-    t.y -= 18
+    t.y -= 16
     if payment:
         t.text(left, t.y, f"Paid via {payment}", size=7.6, color=MUTED)
     if gstin:

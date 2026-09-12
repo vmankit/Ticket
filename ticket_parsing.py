@@ -494,6 +494,20 @@ def _parse_own_current(text):
         if match:
             result[key] = match.group(1).replace(",", "")
 
+    # The total is set much larger than its "Amount Paid" label, so the two
+    # land on separate lines when the text is extracted. Look on either side.
+    if not result["total_fare"]:
+        for idx, line in enumerate(lines):
+            if not re.fullmatch(r"AMOUNT\s*PAID", line.strip(), re.I):
+                continue
+            neighbours = lines[max(0, idx - 1):idx] + lines[idx + 1:idx + 2]
+            for neighbour in neighbours:
+                money = re.fullmatch(r"\s*" + MONEY_RE + r"\s*", neighbour)
+                if money:
+                    result["total_fare"] = money.group(1).replace(",", "")
+                    break
+            break
+
     # ── Itinerary cards ──────────────────────────────────────────────────
     header_re = re.compile(
         r"^([A-Z0-9]{2})\s+(.+?)\s+·\s+([A-Z0-9]{2}\s?\d{2,4})\b", re.I)

@@ -796,8 +796,24 @@ function detectAirline(input,idx){
         alInput.classList.add('auto-field');
         if(alTag)alTag.hidden=false;
         const codeLabel=info.iata&&info.iata!==prefix?`${prefix} / ${info.iata}`:prefix;
-        helper.innerHTML=`<span class="airline-match">${info.logo?`<img class="airline-logo" src="${info.logo}" alt="${info.name} logo" onerror="this.style.display='none'">`:''}<span>✓ ${info.name} (${codeLabel})</span></span>`;
+        helper.innerHTML=`<span class="airline-match"><span>✓ ${info.name} (${codeLabel})</span></span>`;
         helper.className='helper detected';
+        // Walk the providers rather than hiding on the first failure, which
+        // is why no logo ever appeared once one provider stopped serving.
+        const sources=info.logos||(info.logo?[info.logo]:[]);
+        if(sources.length){
+            const img=document.createElement('img');
+            img.className='airline-logo';
+            img.alt=info.name+' logo';
+            let attempt=0;
+            img.onerror=()=>{
+                attempt++;
+                if(attempt<sources.length){ img.src=sources[attempt]; }
+                else { img.remove(); }
+            };
+            img.src=sources[0];
+            helper.querySelector('.airline-match').prepend(img);
+        }
     }
     else{
         // Detection failed, so hand the field back to the user rather than

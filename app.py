@@ -212,23 +212,39 @@ AIRLINE_ALIASES = {
 }
 
 
+# Several providers, tried in order: a single source silently stops serving
+# and every logo then disappears with no other symptom.
+LOGO_SOURCES = (
+    "https://pics.avs.io/64/64/{code}.png",
+    "https://content.airhex.com/content/logos/airlines_{code}_64_64_s.png",
+    "https://images.kiwi.com/airlines/64/{code}.png",
+)
+
+
+def airline_logo_urls(iata_code):
+    code = (iata_code or "").upper()
+    return [source.format(code=code) for source in LOGO_SOURCES] if code else []
+
+
 def airline_logo_url(iata_code):
-    return f"https://images.kiwi.com/airlines/64/{iata_code}.png"
+    urls = airline_logo_urls(iata_code)
+    return urls[0] if urls else ""
 
 
 @lru_cache(maxsize=256)
 def fetch_airline_logo_bytes(iata_code):
     if not iata_code:
         return None
-    try:
-        with urllib.request.urlopen(airline_logo_url(iata_code.upper()), timeout=1.5) as response:
-            if getattr(response, "status", 200) != 200:
-                return None
-            data = response.read(120000)
-            if data.startswith((b"\x89PNG", b"\xff\xd8", b"GIF")):
-                return data
-    except Exception:
-        return None
+    for url in airline_logo_urls(iata_code):
+        try:
+            with urllib.request.urlopen(url, timeout=1.5) as response:
+                if getattr(response, "status", 200) != 200:
+                    continue
+                data = response.read(120000)
+                if data.startswith((b"\x89PNG", b"\xff\xd8", b"GIF")):
+                    return data
+        except Exception:
+            continue
     return None
 
 
@@ -243,7 +259,8 @@ def airline_payload():
         return _AIRLINE_PAYLOAD_CACHE
     
     payload = {
-        code: {"name": name, "iata": code, "logo": airline_logo_url(code)}
+        code: {"name": name, "iata": code, "logo": airline_logo_url(code),
+               "logos": airline_logo_urls(code)}
         for code, name in AIRLINES.items()
     }
     for alias, iata in AIRLINE_ALIASES.items():
@@ -253,6 +270,7 @@ def airline_payload():
                 "iata": iata,
                 "alias_of": iata,
                 "logo": airline_logo_url(iata),
+                "logos": airline_logo_urls(iata),
             }
     
     _AIRLINE_PAYLOAD_CACHE = payload
@@ -1496,6 +1514,10 @@ def generate_ticket():
     draw_header(t, company=COMPANY, pnr=pnr, booking_id=booking_id, status=ticket_status)
 
     t.section("Itinerary")
+    for flight in flights:
+        # Cached and short-timeout; falls back to the code badge when the
+        # carrier logo cannot be fetched.
+        flight["logo_bytes"] = fetch_airline_logo_bytes(flight.get("airline_code"))
     for index, flight in enumerate(flights):
         if index and flight.get("layover"):
             draw_layover(t, f"{flight['layover']} in {flight.get('from_city') or flight.get('from_code')}")
@@ -1527,7 +1549,7 @@ def generate_ticket():
         t,
         company=COMPANY,
         issued=f"Issued {datetime.now().strftime('%d %b %Y, %H:%M')} IST"
-               f"  ·  {booking_platform}  ·  {fare_type}  ·  {refund_status}",
+               f"  ·  {fare_type}  ·  {refund_status}",
         contact_line=f"{agency_email}  ·  {agency_phone}",
         terms="Carry a valid government-issued photo ID for every passenger. Check-in usually "
               "closes 60 minutes before departure (3 hours for international). All times are "

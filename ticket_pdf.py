@@ -434,10 +434,10 @@ def draw_fares(t, total_str, *, remarks, gst_company, gstin):
     t.y -= 16
 
     label = "Amount Paid"
-    value_w = t.c.stringWidth(total_str, "Helvetica-Bold", 17)
+    value_w = t.c.stringWidth(total_str, "Helvetica-Bold", 13)
     label_w = t.c.stringWidth(label.upper(), "Helvetica-Bold", 7.2) + len(label) * 1.5
     t.tracked(right - value_w - 16 - label_w, t.y, label)
-    t.text(right, t.y, total_str, size=17, font="Helvetica-Bold", color=INK, align="right")
+    t.text(right, t.y, total_str, size=13, font="Helvetica-Bold", color=INK, align="right")
 
     details = []
     if remarks:

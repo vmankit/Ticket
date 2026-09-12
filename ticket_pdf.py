@@ -9,8 +9,11 @@ import io
 import re
 from html import escape
 
-from reportlab.graphics.barcode.code128 import Code128
+from reportlab.graphics.barcode import createBarcodeDrawing
+from reportlab.graphics import renderPDF
 from reportlab.lib.colors import HexColor, white
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.utils import ImageReader
@@ -36,6 +39,7 @@ PNR_BASE_MM = 27.5
 
 # Itinerary
 ITINERARY_BASE_MM = 38.9
+SECTION_GAP_MM = 3.5      # section label baseline to the block beneath it
 CARD_TOP_MM = 42.7
 CARD_RADIUS_MM = 4.5
 CARD_GAP_MM = 4.0
@@ -44,18 +48,18 @@ CARD_GAP_MM = 4.0
 HEAD_H_MM = 12.1
 BADGE_BASE_MM = 6.5
 CODE_BASE_MM = 24.0
-CITY_BASE_MM = 30.3
-TIME_BASE_MM = 38.8
-DATE_BASE_MM = 44.1
+CITY_BASE_MM = 31.0
+TIME_BASE_MM = 39.4
+DATE_BASE_MM = 44.8
 PATH_Y_MM = 35.9
 PLANE_Y_MM = 29.5
 ARC_LIFT_MM = 3.53
-TERMINAL_TOP_MM = 47.0
+TERMINAL_TOP_MM = 47.6
 TERMINAL_H_MM = 5.5
 # Gaps, so a row that is not shown closes up instead of leaving a band of
 # white where the reference happened to put one.
-DATE_BLOCK_END_MM = 47.0          # where the date row stops
-BAGGAGE_GAP_MM = 8.8              # above the baggage row
+DATE_BLOCK_END_MM = 47.6          # where the date row stops
+BAGGAGE_GAP_MM = 6.6              # above the baggage row
 CARD_TAIL_MM = 5.1                # below the last row, to the card foot
 
 # Passengers
@@ -77,12 +81,36 @@ PAX_COLUMNS = (
 )
 
 # Amount, divider, footer
-AMOUNT_BASE_MM = 151.6
-DIVIDER_MM = 157.5
-ISSUED_BASE_MM = 163.2
-TERMS_LEADING_MM = 4.2
+# Gaps rather than page positions, so a short card or a continuation page does
+# not leave the amount stranded far below the table it belongs to.
+AMOUNT_GAP_MM = 7.0         # table foot to the amount baseline
+DIVIDER_GAP_MM = 5.9        # amount baseline to the divider
+ISSUED_GAP_MM = 5.7         # divider to the first footer line
+TERMS_LEADING_MM = 4.4
 COMPANY_GAP_MM = 7.2
-FOOTER_LINE_MM = 4.0
+FOOTER_LINE_MM = 4.3
+
+def _register_fonts():
+    """Liberation Sans if the system has it, Helvetica otherwise.
+
+    Liberation is metrically the same as Helvetica but has real text figures
+    and a tighter bold, which is what makes a document read as typeset rather
+    than as a screen mock-up. It is not installed everywhere, so its absence
+    has to be survivable rather than fatal.
+    """
+    base = "/usr/share/fonts/truetype/liberation"
+    faces = (("Doc", f"{base}/LiberationSans-Regular.ttf"),
+             ("Doc-Bold", f"{base}/LiberationSans-Bold.ttf"))
+    try:
+        for name, path in faces:
+            pdfmetrics.registerFont(TTFont(name, path))
+        pdfmetrics.registerFontFamily("Doc", normal="Doc", bold="Doc-Bold")
+        return "Doc", "Doc-Bold"
+    except Exception:
+        return "Helvetica", "Helvetica-Bold"
+
+
+FONT, FONT_BOLD = _register_fonts()
 
 INK = HexColor("#111318")
 BODY = HexColor("#374151")
@@ -90,6 +118,14 @@ MUTED = HexColor("#6B7280")
 FAINT = HexColor("#9CA3AF")
 LINE = HexColor("#E5E7EB")
 WASH = HexColor("#F4F5F7")
+
+STATUS_TINTS = {
+    "Confirmed": HexColor("#E8F3EC"),
+    "On Hold": HexColor("#FBF1E3"),
+    "Waitlisted": HexColor("#FBF1E3"),
+    "Cancelled": HexColor("#FBEAE8"),
+    "Refunded": HexColor("#F1F2F4"),
+}
 
 STATUS_COLORS = {
     "Confirmed": HexColor("#15803D"),
@@ -123,7 +159,7 @@ class TicketCanvas:
         return self.y
 
     # ── primitives ───────────────────────────────────────────────────────
-    def text(self, x, y, value, size=9, font="Helvetica", color=BODY, align="left"):
+    def text(self, x, y, value, size=9, font=FONT, color=BODY, align="left"):
         self.c.setFont(font, size)
         self.c.setFillColor(color)
         value = str(value or "")
@@ -134,7 +170,7 @@ class TicketCanvas:
         else:
             self.c.drawString(x, y, value)
 
-    def tracked(self, x, y, value, size=7.2, color=FAINT, tracking=1.5, font="Helvetica-Bold"):
+    def tracked(self, x, y, value, size=7.2, color=FAINT, tracking=1.5, font=FONT_BOLD):
         """Letter-spaced small caps, used for section labels."""
         self.c.setFont(font, size)
         self.c.setFillColor(color)
@@ -164,15 +200,15 @@ class TicketCanvas:
         self.c.restoreState()
 
     def pill(self, x, y, label, fill=INK, color=white, size=7, pad=9, height=15):
-        self.c.setFont("Helvetica-Bold", size)
-        width = self.c.stringWidth(label, "Helvetica-Bold", size) + pad * 2
+        self.c.setFont(FONT_BOLD, size)
+        width = self.c.stringWidth(label, FONT_BOLD, size) + pad * 2
         self.rounded(x, y, width, height, height / 2, fill=fill, stroke=None)
         self.text(x + width / 2, y + height / 2 - size / 2 + 2.1, label,
-                  size=size, font="Helvetica-Bold", color=color, align="center")
+                  size=size, font=FONT_BOLD, color=color, align="center")
         return width
 
     def paragraph(self, x, y, width, html, size=7.6, leading=11, color=MUTED):
-        style = ParagraphStyle("p", fontName="Helvetica", fontSize=size,
+        style = ParagraphStyle("p", fontName=FONT, fontSize=size,
                                leading=leading, textColor=color)
         para = Paragraph(html, style)
         _, height = para.wrap(width, 400)
@@ -194,7 +230,10 @@ class TicketCanvas:
             self.anchor(at)
         else:
             self.y -= 16
-        self.tracked(MARGIN, self.y, label, size=8.5, tracking=1.6)
+        self.tracked(MARGIN, self.y, label, size=9, tracking=2.6)
+        # Clear the label before the block below anchors, or a block that has
+        # flowed past its measured position lands on top of it.
+        self.y -= SECTION_GAP_MM * MM
 
     def save(self):
         self.c.save()
@@ -215,26 +254,34 @@ def draw_header(t, *, company, pnr, booking_id, status):
     initials = "".join(word[0] for word in re.findall(r"[A-Za-z]+", company["name"]))[:2].upper()
     t.rounded(MARGIN, t.at(LOGO_TOP_MM) - size, size, size, 2.2 * MM, fill=INK, stroke=None)
     t.text(MARGIN + size / 2, t.at(LOGO_TOP_MM) - size / 2 - 3.4, initials or "BH",
-           size=10, font="Helvetica-Bold", color=white, align="center")
+           size=10, font=FONT_BOLD, color=white, align="center")
 
-    t.text(MARGIN + size + 2.2 * MM, t.at(BRAND_BASE_MM), company["name"].upper(),
-           size=12.5, font="Helvetica-Bold", color=INK)
+    # Set as large as the reference wordmark, then only as small as it must be
+    # to clear the PNR block; a long trading name should not run into it.
+    brand_x = MARGIN + size + 2.2 * MM
+    brand_size = 16.5
+    room = (PAGE_W - MARGIN - 34 * MM) - brand_x
+    while brand_size > 11 and t.c.stringWidth(company["name"].upper(), FONT_BOLD, brand_size) > room:
+        brand_size -= 0.25
+    t.text(brand_x, t.at(BRAND_BASE_MM), company["name"].upper(),
+           size=brand_size, font=FONT_BOLD, color=INK)
 
     booking_y = t.at(BOOKING_BASE_MM)
     subtitle = "E-ticket" + (f"  \u00b7  Booking {booking_id}" if booking_id else "")
-    t.text(MARGIN, booking_y, subtitle, size=8, color=MUTED)
+    t.text(MARGIN, booking_y, subtitle, size=9, color=MUTED)
 
     # The status has no counterpart on the reference, so it rides the booking
     # line rather than claiming a row and shifting everything below it.
     colour = STATUS_COLORS.get(status, STATUS_COLORS["Confirmed"])
-    subtitle_w = t.c.stringWidth(subtitle, "Helvetica", 8)
-    t.pill(MARGIN + subtitle_w + 5 * MM, booking_y - 2.4, status.upper(),
-           fill=colour, size=6.4, pad=7, height=12)
+    tint = STATUS_TINTS.get(status, STATUS_TINTS["Confirmed"])
+    subtitle_w = t.c.stringWidth(subtitle, FONT, 9)
+    t.pill(MARGIN + subtitle_w + 5 * MM, booking_y - 2.6, status.upper(),
+           fill=tint, color=colour, size=6.8, pad=2.4 * MM, height=4.6 * MM)
 
-    label_w = t.c.stringWidth("PNR", "Helvetica-Bold", 8) + 3 * 1.6
-    t.tracked(right - label_w, t.at(PNR_LABEL_BASE_MM), "PNR", size=8, tracking=1.6)
-    t.text(right, t.at(PNR_BASE_MM), pnr or "\u2014", size=27,
-           font="Helvetica-Bold", color=INK, align="right")
+    label_w = t.c.stringWidth("PNR", FONT_BOLD, 8) + 3 * 2.6
+    t.tracked(right - label_w, t.at(PNR_LABEL_BASE_MM), "PNR", size=8, tracking=2.6)
+    t.text(right, t.at(PNR_BASE_MM), pnr or "\u2014", size=28,
+           font=FONT_BOLD, color=INK, align="right")
 
     t.y = t.at(PNR_BASE_MM)
 
@@ -344,16 +391,16 @@ def draw_flight(t, flight, index, total):
     badge_cx = MARGIN + 8.55 * MM
     t.c.setFillColor(INK)
     t.c.circle(badge_cx, badge_base + 2.2, 2.9 * MM, stroke=0, fill=1)
-    t.text(badge_cx, badge_base, code, size=6.5, font="Helvetica-Bold",
+    t.text(badge_cx, badge_base, code, size=6.5, font=FONT_BOLD,
            color=white, align="center")
 
     airline = (flight.get("airline") or "").upper()
     title = f"{airline}  \u00b7  {flight.get('flight_no', '')}".strip(" \u00b7")
-    t.text(MARGIN + 13.8 * MM, badge_base, title, size=9, font="Helvetica-Bold", color=INK)
+    t.text(MARGIN + 13.8 * MM, badge_base, title, size=9, font=FONT_BOLD, color=INK)
 
     travel_class = (flight.get("class") or "Economy").upper()
     pill_h = 5.5 * MM
-    pill_w = t.c.stringWidth(travel_class, "Helvetica-Bold", 8) + 2 * 3.2 * MM
+    pill_w = t.c.stringWidth(travel_class, FONT_BOLD, 8) + 2 * 3.2 * MM
     t.pill(PAGE_W - MARGIN - 5.6 * MM - pill_w, below(BADGE_BASE_MM + 2.1) , travel_class,
            size=8, pad=3.2 * MM, height=pill_h)
 
@@ -372,19 +419,19 @@ def draw_flight(t, flight, index, total):
     right_x = PAGE_W - MARGIN - 5.7 * MM
 
     t.text(left_x, below(CODE_BASE_MM), flight.get("from_code", ""),
-           size=26, font="Helvetica-Bold", color=INK)
+           size=31, font=FONT_BOLD, color=INK)
     t.text(right_x, below(CODE_BASE_MM), flight.get("to_code", ""),
-           size=26, font="Helvetica-Bold", color=INK, align="right")
+           size=31, font=FONT_BOLD, color=INK, align="right")
     t.text(left_x, below(CITY_BASE_MM), flight.get("from_city") or flight.get("from_code", ""),
-           size=10.5, color=MUTED)
+           size=11, color=MUTED)
     t.text(right_x, below(CITY_BASE_MM), flight.get("to_city") or flight.get("to_code", ""),
-           size=10.5, color=MUTED, align="right")
+           size=11, color=MUTED, align="right")
     t.text(left_x, below(TIME_BASE_MM), flight.get("dep_time") or flight.get("dep_time_raw") or "\u2014",
-           size=16, font="Helvetica-Bold", color=INK)
+           size=18, font=FONT_BOLD, color=INK)
     t.text(right_x, below(TIME_BASE_MM), flight.get("arr_time") or flight.get("arr_time_raw") or "\u2014",
-           size=16, font="Helvetica-Bold", color=INK, align="right")
-    t.text(left_x, below(DATE_BASE_MM), flight.get("date", ""), size=8.5, color=FAINT)
-    t.text(right_x, below(DATE_BASE_MM), flight.get("date", ""), size=8.5, color=FAINT, align="right")
+           size=18, font=FONT_BOLD, color=INK, align="right")
+    t.text(left_x, below(DATE_BASE_MM), flight.get("date", ""), size=9, color=FAINT)
+    t.text(right_x, below(DATE_BASE_MM), flight.get("date", ""), size=9, color=FAINT, align="right")
 
     # Flight path: a fixed span centred on the card, as on the reference.
     _flight_path(t, PAGE_W / 2 - 21.9 * MM, PAGE_W / 2 + 21.9 * MM,
@@ -401,7 +448,7 @@ def draw_flight(t, flight, index, total):
             continue
         label = terminal if terminal.upper().startswith("TERMINAL") else f"Terminal {terminal}"
         pad = 3.0 * MM
-        width = t.c.stringWidth(label, "Helvetica-Bold", 8) + 2 * pad
+        width = t.c.stringWidth(label, FONT_BOLD, 8) + 2 * pad
         x = x_edge - width if align == "right" else x_edge
         t.pill(x, below(TERMINAL_TOP_MM + TERMINAL_H_MM), label, fill=WASH, color=INK,
                size=8, pad=pad, height=TERMINAL_H_MM * MM)
@@ -415,7 +462,7 @@ def draw_flight(t, flight, index, total):
                 _fmt(flight.get("hand_bag"), "") and f"{flight['hand_bag']} cabin",
             ) if part)
         t.text(left_x + 14.5 * MM, baggage_base, detail, size=9,
-               font="Helvetica-Bold", color=INK)
+               font=FONT_BOLD, color=INK)
 
     t.y = bottom - CARD_GAP_MM * MM
 
@@ -449,7 +496,7 @@ def draw_passengers(t, passengers, flights):
 
     def cell_style(bold, size, color=MUTED):
         return ParagraphStyle(
-            "cell", fontName="Helvetica-Bold" if bold else "Helvetica",
+            "cell", fontName=FONT_BOLD if bold else FONT,
             fontSize=size, leading=size + 2.6, textColor=color)
 
     rows = []
@@ -463,11 +510,11 @@ def draw_passengers(t, passengers, flights):
         meal_text = "<br/>".join(_fmt(m) for m in meals) if meals else _fmt(pax.get("meal"))
 
         cells = [
-            (xs[0], widths[0], f"{index + 1}.&nbsp;&nbsp;{escape(name)}", True, INK, 9.5),
-            (xs[1], widths[1], sectors, False, MUTED, 9.5),
-            (xs[2], widths[2], escape(pax.get("pnr") or "\u2014"), False, MUTED, 9.5),
-            (xs[3], widths[3], seat_text, False, MUTED, 9.5),
-            (xs[4], widths[4], meal_text, False, MUTED, 9.5),
+            (xs[0], widths[0], f"{index + 1}.&nbsp;&nbsp;{escape(name)}", True, INK, 10),
+            (xs[1], widths[1], sectors, False, MUTED, 9),
+            (xs[2], widths[2], escape(pax.get("pnr") or "\u2014"), False, BODY, 9),
+            (xs[3], widths[3], seat_text, False, MUTED, 9),
+            (xs[4], widths[4], meal_text, False, MUTED, 9),
         ]
         tallest = 0
         for x, width, html, bold, color, size in cells:
@@ -495,10 +542,10 @@ def draw_passengers(t, passengers, flights):
         label_y = top - PAX_LABEL_DY_MM * MM
         for index, ((label, _ratio), x) in enumerate(zip(PAX_COLUMNS, xs)):
             if index == len(PAX_COLUMNS) - 1:  # right-aligned, kept inside the table
-                width = t.c.stringWidth(label, "Helvetica-Bold", 8) + len(label) * 1.6
-                t.tracked(barcode_right - width, label_y, label, size=8, tracking=1.6)
+                width = t.c.stringWidth(label, FONT_BOLD, 7.6) + len(label) * 0.8
+                t.tracked(barcode_right - width, label_y, label, size=7.6, tracking=0.8)
             else:
-                t.tracked(x, label_y, label, size=8, tracking=1.6)
+                t.tracked(x, label_y, label, size=7.6, tracking=0.8)
 
         y = top - head_h
         for row_index, (cells, row_h, payload) in enumerate(chunk):
@@ -510,16 +557,19 @@ def draw_passengers(t, passengers, flights):
                 _, height = para.wrap(width - PAX_CELL_INSET_MM * MM, 200)
                 para.drawOn(t.c, x, base + size * 0.72 + 0.7 * MM - height)
 
-            # Scale the bars to the column so the code cannot run over the meal
-            # text to its left, and centre them in the row.
+            # A dense square 2D code, as a gate scanner would read - the old
+            # Code128 stripes were the most screen-like thing on the page.
+            side = min(row_h - 2 * MM, barcode_width, 11 * MM)
             try:
-                bar_h = min(row_h - 4 * MM, 9 * MM)
-                bar_width = 0.5
-                barcode = Code128(payload, barHeight=bar_h, barWidth=bar_width, humanReadable=False)
-                if barcode.width > barcode_width:
-                    bar_width *= barcode_width / barcode.width
-                    barcode = Code128(payload, barHeight=bar_h, barWidth=bar_width, humanReadable=False)
-                barcode.drawOn(t.c, barcode_right - barcode.width, y - (row_h + bar_h) / 2)
+                code = createBarcodeDrawing("ECC200DataMatrix", value=payload)
+                # Scale on the canvas rather than on the drawing: a Drawing's
+                # own width/height and its transform are set independently, and
+                # setting both leaves the symbol at whichever was applied last.
+                t.c.saveState()
+                t.c.translate(barcode_right - side, y - (row_h + side) / 2)
+                t.c.scale(side / code.width, side / code.height)
+                renderPDF.draw(code, t.c, 0, 0)
+                t.c.restoreState()
             except Exception:
                 pass
 
@@ -553,13 +603,13 @@ def draw_fares(t, total_str, *, remarks, gst_company, gstin):
     read back as a single line."""
     t.space(20 * MM)
     right = PAGE_W - MARGIN
-    t.anchor(AMOUNT_BASE_MM)
+    t.y -= AMOUNT_GAP_MM * MM
 
     label = "Amount Paid"
-    value_w = t.c.stringWidth(total_str, "Helvetica-Bold", 9.5)
-    label_w = t.c.stringWidth(label.upper(), "Helvetica-Bold", 8) + len(label) * 1.6
-    t.tracked(right - value_w - 3.3 * MM - label_w, t.y, label, size=8, tracking=1.6)
-    t.text(right, t.y, total_str, size=9.5, font="Helvetica-Bold", color=INK, align="right")
+    value_w = t.c.stringWidth(total_str, FONT_BOLD, 11.5)
+    label_w = t.c.stringWidth(label.upper(), FONT_BOLD, 7.6) + len(label) * 1.4
+    t.tracked(right - value_w - 3.3 * MM - label_w, t.y, label, size=7.6, tracking=1.4)
+    t.text(right, t.y, total_str, size=11.5, font=FONT_BOLD, color=INK, align="right")
 
     details = []
     if remarks:
@@ -577,25 +627,23 @@ def draw_fares(t, total_str, *, remarks, gst_company, gstin):
 def draw_footer(t, *, company, issued, contact_line, terms):
     # Measure first: this is the last block on the page, so it only needs to
     # clear the bottom margin, not the larger gap `space()` reserves for cards.
-    style = ParagraphStyle("p", fontName="Helvetica", fontSize=7.5, leading=TERMS_LEADING_MM * MM)
+    style = ParagraphStyle("p", fontName=FONT, fontSize=8, leading=TERMS_LEADING_MM * MM)
     _, terms_h = Paragraph(terms, style).wrap(CONTENT_W, 400)
-    needed = (ISSUED_BASE_MM - DIVIDER_MM) * MM + terms_h + (COMPANY_GAP_MM + 2 * FOOTER_LINE_MM) * MM
+    needed = (DIVIDER_GAP_MM + ISSUED_GAP_MM) * MM + terms_h + (COMPANY_GAP_MM + 2 * FOOTER_LINE_MM) * MM
     if t.y - needed < MARGIN:
         t.c.showPage()
         t.y = PAGE_H - MARGIN
-        t.anchor(DIVIDER_MM)
-    else:
-        t.anchor(DIVIDER_MM)
 
+    t.y -= DIVIDER_GAP_MM * MM
     t.rule(MARGIN, t.y, CONTENT_W, color=HexColor("#EEF0F3"), line_width=0.75)
-    t.y = t.at(ISSUED_BASE_MM) if t.y == t.at(DIVIDER_MM) else t.y - (ISSUED_BASE_MM - DIVIDER_MM) * MM
-    t.text(MARGIN, t.y, issued, size=7.5, color=FAINT)
+    t.y -= ISSUED_GAP_MM * MM
+    t.text(MARGIN, t.y, issued, size=8, color=FAINT)
 
     t.y -= 1.7 * MM
-    height = t.paragraph(MARGIN, t.y, CONTENT_W, terms, size=7.5, leading=TERMS_LEADING_MM * MM)
+    height = t.paragraph(MARGIN, t.y, CONTENT_W, terms, size=8, leading=TERMS_LEADING_MM * MM)
     t.y -= height + (COMPANY_GAP_MM - TERMS_LEADING_MM + 2.6) * MM
-    t.text(MARGIN, t.y, company["name"], size=7.5, font="Helvetica-Bold", color=BODY)
+    t.text(MARGIN, t.y, company["name"], size=8, font=FONT_BOLD, color=BODY)
     t.y -= FOOTER_LINE_MM * MM
-    t.text(MARGIN, t.y, f"{company['address']} - {company['pincode']}", size=7.5, color=FAINT)
+    t.text(MARGIN, t.y, f"{company['address']} - {company['pincode']}", size=8, color=FAINT)
     t.y -= FOOTER_LINE_MM * MM
-    t.text(MARGIN, t.y, contact_line, size=7.5, color=FAINT)
+    t.text(MARGIN, t.y, contact_line, size=8, color=FAINT)

@@ -350,6 +350,8 @@ def _parse_own_legacy(text):
         ("base_fare", r"Base Fare\s+" + MONEY_RE),
         ("taxes_fees", r"Airline Taxes(?:\s*&\s*Fees)?\s+" + MONEY_RE),
         ("total_fare", r"Total Amount\s+" + MONEY_RE),
+        # Label and amount are set at the same size, so they extract as one line.
+        ("total_fare", r"AMOUNT\s*PAID\s+" + MONEY_RE),
     ):
         match = re.search(pattern, joined, re.I)
         if match:
@@ -492,13 +494,15 @@ def _parse_own_current(text):
         ("base_fare", r"Base Fare\s+" + MONEY_RE),
         ("taxes_fees", r"Airline Taxes(?:\s*&\s*Fees)?\s+" + MONEY_RE),
         ("total_fare", r"Total Amount\s+" + MONEY_RE),
+        # Label and amount are set at the same size, so they extract as one line.
+        ("total_fare", r"AMOUNT\s*PAID\s+" + MONEY_RE),
     ):
         match = re.search(pattern, joined, re.I)
         if match:
             result[key] = match.group(1).replace(",", "")
 
-    # The total is set much larger than its "Amount Paid" label, so the two
-    # land on separate lines when the text is extracted. Look on either side.
+    # Tickets issued before the amount was brought down to the label's size set
+    # it much larger, so the two landed on separate lines. Look on either side.
     if not result["total_fare"]:
         for idx, line in enumerate(lines):
             if not re.fullmatch(r"AMOUNT\s*PAID", line.strip(), re.I):

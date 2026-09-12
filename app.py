@@ -36,6 +36,8 @@ from airports_data import AIRPORTS_DB
 from excel_tracker import get_next_booking_id, save_to_excel
 from utils import generate_qr, generate_ticket_number
 from ticket_pdf import (
+    ITINERARY_BASE_MM,
+    PAX_LABEL_BASE_MM,
     TicketCanvas,
     draw_fares,
     draw_flight,
@@ -1546,13 +1548,13 @@ def generate_ticket():
 
     draw_header(t, company=COMPANY, pnr=pnr, booking_id=booking_id, status=ticket_status)
 
-    t.section("Itinerary")
+    t.section("Itinerary", at=ITINERARY_BASE_MM)
     for index, flight in enumerate(flights):
         if index and flight.get("layover"):
             draw_layover(t, f"{flight['layover']} in {flight.get('from_city') or flight.get('from_code')}")
         draw_flight(t, flight, index, len(flights))
 
-    t.section("Passengers")
+    t.section("Passengers", at=PAX_LABEL_BASE_MM)
     draw_passengers(t, passengers, flights)
 
     draw_fares(t, total_fare_str, remarks=remarks,

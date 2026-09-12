@@ -1528,8 +1528,7 @@ def generate_ticket():
         company=COMPANY,
         issued=f"Issued {datetime.now().strftime('%d %b %Y, %H:%M')} IST"
                f"  ·  {booking_platform}  ·  {fare_type}  ·  {refund_status}",
-        contact_line=f"{agency_email}  ·  {agency_phone}"
-                     f"  ·  Passenger contact: {customer_email} / {customer_phone}",
+        contact_line=f"{agency_email}  ·  {agency_phone}",
         terms="Carry a valid government-issued photo ID for every passenger. Check-in usually "
               "closes 60 minutes before departure (3 hours for international). All times are "
               "local to each airport. Quote the airline PNR to the airline, and the Booking ID "

@@ -481,12 +481,9 @@ def _parse_own_current(text):
     if issued:
         result["booking_date"] = _find_date(issued.group(1))
 
-    emails = re.findall(r"[\w.%+-]+@[\w.-]+\.[A-Za-z]{2,}", joined)
-    if emails:
-        result["customer_email"] = emails[-1]
-    contact = re.search(r"Passenger contact:\s*\S+\s*/\s*(\+?[\d\s-]{10,})", joined)
-    if contact:
-        result["customer_phone"] = contact.group(1).strip()
+    # The passenger's contact details are not printed on the ticket, so they
+    # cannot be recovered. The only address on the page is the agency's, and
+    # returning that would quietly refill it as the customer's.
 
     for key, pattern in (
         ("base_fare", r"Base Fare\s+" + MONEY_RE),

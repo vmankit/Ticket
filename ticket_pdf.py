@@ -147,19 +147,67 @@ def draw_header(t, *, company, pnr, booking_id, status):
     t.y -= 26
 
 
-def _plane(t, cx, cy, size=7):
-    """A small plane glyph; the built-in fonts have no such character."""
+# Half a top-down airliner, nose at +x; mirrored about y to draw the whole.
+_PLANE_HALF = [
+    (1.00, 0.00),   # nose
+    (0.62, 0.06), (0.40, 0.08),
+    (0.06, 0.64), (-0.15, 0.66),   # swept wing
+    (-0.07, 0.09),
+    (-0.52, 0.08),
+    (-0.72, 0.33), (-0.84, 0.34),  # tailplane
+    (-0.78, 0.06),
+    (-0.94, 0.05), (-0.96, 0.00),
+]
+
+
+def _plane(t, cx, cy, size=11, angle=0):
+    """A plane silhouette; the built-in fonts have no such character."""
     c = t.c
     c.saveState()
-    c.setFillColor(FAINT)
+    c.translate(cx, cy)
+    if angle:
+        c.rotate(angle)
+    c.scale(size, size)
+    c.setFillColor(INK)
     path = c.beginPath()
-    path.moveTo(cx + size, cy)
-    path.lineTo(cx - size * 0.45, cy + size * 0.52)
-    path.lineTo(cx - size * 0.1, cy)
-    path.lineTo(cx - size * 0.45, cy - size * 0.52)
+    path.moveTo(*_PLANE_HALF[0])
+    for x, y in _PLANE_HALF[1:]:
+        path.lineTo(x, y)
+    for x, y in reversed(_PLANE_HALF[:-1]):
+        path.lineTo(x, -y)
     path.close()
     c.drawPath(path, fill=1, stroke=0)
     c.restoreState()
+
+
+def _flight_path(t, x0, x1, y, duration):
+    """A dashed arc between the two airports, with the plane riding it."""
+    lift = max(8, min(18, (x1 - x0) * 0.11))
+    c = t.c
+    c.saveState()
+    c.setStrokeColor(LINE)
+    c.setFillColor(FAINT)
+    c.setLineWidth(0.9)
+    c.circle(x0, y, 2.1, stroke=1, fill=0)
+    c.circle(x1, y, 2.1, stroke=0, fill=1)
+
+    span = x1 - x0
+    control = lift * 1.35
+    c.setStrokeColor(HexColor("#CBD0D8"))
+    c.setLineWidth(1.1)
+    c.setDash((2.2, 3.2), 0)
+    arc = c.beginPath()
+    arc.moveTo(x0 + 4, y)
+    arc.curveTo(x0 + span * 0.28, y + control,
+                x0 + span * 0.72, y + control,
+                x1 - 4, y)
+    c.drawPath(arc, stroke=1, fill=0)
+    c.restoreState()
+
+    # The tangent is flat at the apex, so the plane sits level on the arc.
+    _plane(t, (x0 + x1) / 2, y + lift, size=11)
+    if duration:
+        t.text((x0 + x1) / 2, y - 13, duration, size=7.6, color=MUTED, align="center")
 
 
 def draw_flight(t, flight, index, total):
@@ -237,19 +285,7 @@ def draw_flight(t, flight, index, total):
     mid_right = right_x - 100
     path_y = time_y + 4
     if mid_right > mid_left + 40:
-        t.c.saveState()
-        t.c.setStrokeColor(LINE)
-        t.c.setFillColor(FAINT)
-        t.c.setLineWidth(0.8)
-        t.c.circle(mid_left, path_y, 2, stroke=1, fill=0)
-        t.c.circle(mid_right, path_y, 2, stroke=0, fill=1)
-        t.c.setDash((2, 3), 2)
-        t.c.line(mid_left + 4, path_y, mid_right - 4, path_y)
-        t.c.restoreState()
-        _plane(t, (mid_left + mid_right) / 2, path_y + 9)
-        if flight.get("duration"):
-            t.text((mid_left + mid_right) / 2, path_y - 13, flight["duration"],
-                   size=7.6, color=MUTED, align="center")
+        _flight_path(t, mid_left, mid_right, path_y, flight.get("duration"))
 
     if has_baggage:
         baggage_y = divider - DATE_DY - 25

@@ -873,11 +873,6 @@ function addPassenger(){
                     <option value="Infant">Infant (&lt;2)</option>
                 </select>
             </div>
-            <div class="form-group" style="grid-column:1/-1">
-                <label>Ticket Number <span class="auto-tag">Auto</span></label>
-                <input type="text" name="pax_${i}_ticket_no" class="auto-field"
-                       placeholder="Generated automatically — leave blank">
-            </div>
         </div>
 
         <div class="section-title" style="margin-top:12px; margin-bottom:8px;"><span class="dot"></span>INTERNATIONAL / TRAVEL DOCS</div>
@@ -978,7 +973,6 @@ function applyExtractedData(data){
     resetPassengers(pax.length||1);
     pax.forEach((p,i)=>{
         if(p.name)document.querySelector(`[name="pax_${i}_name"]`).value=p.name;
-        if(p.ticket_no)document.querySelector(`[name="pax_${i}_ticket_no"]`).value=p.ticket_no;
         if(p.dob)document.querySelector(`[name="pax_${i}_dob"]`).value=p.dob;
         if(p.passport)document.querySelector(`[name="pax_${i}_passport"]`).value=p.passport;
     });
@@ -1055,7 +1049,6 @@ function getSampleTicketData(){
         passengers:[
             {
                 name:'JOHN DOE',
-                ticket_no:'6191234567890',
                 dob:'1990-01-15',
                 passport:'K1234567',
                 seat:'12A',

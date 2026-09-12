@@ -34,7 +34,7 @@ except ImportError:
 # ─── Import comprehensive airport DB from CSV extraction ────────────
 from airports_data import AIRPORTS_DB
 from excel_tracker import get_next_booking_id, save_to_excel
-from utils import generate_qr, generate_ticket_number
+from utils import generate_qr
 from ticket_pdf import (
     ITINERARY_BASE_MM,
     PAX_LABEL_BASE_MM,
@@ -1455,14 +1455,8 @@ def generate_ticket():
     )
     if not pax_indices:
         pax_indices = list(range(int(request.form.get("pax_count", "1") or 1)))
-    first_airline_code = ""
-    if flights:
-        first_airline_code = extract_airline_code(flights[0].get("flight_no", ""))
     for i in pax_indices:
         prefix = f"pax_{i}_"
-        ticket_no = request.form.get(f"{prefix}ticket_no", "").strip()
-        if not ticket_no:
-            ticket_no = generate_ticket_number(first_airline_code)
         # Build per-segment passenger allocations: seats, meals, baggage
         seats_per_segment = []
         meals_per_segment = []
@@ -1498,7 +1492,7 @@ def generate_ticket():
             "passport": request.form.get(f"{prefix}passport", ""),
             "dob": request.form.get(f"{prefix}dob", ""),
             "doe": request.form.get(f"{prefix}doe", ""),
-            "ticket_no": ticket_no,
+            "pnr": pnr,
             "seat": single_seat,
             "meal": single_meal,
             "checkin_bag": single_ck,

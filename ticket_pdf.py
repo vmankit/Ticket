@@ -52,9 +52,11 @@ PLANE_Y_MM = 29.5
 ARC_LIFT_MM = 3.53
 TERMINAL_TOP_MM = 47.0
 TERMINAL_H_MM = 5.5
-BAGGAGE_BASE_MM = 61.3
-CARD_H_BAGGAGE_MM = 66.4
-CARD_H_PLAIN_MM = 49.6
+# Gaps, so a row that is not shown closes up instead of leaving a band of
+# white where the reference happened to put one.
+DATE_BLOCK_END_MM = 47.0          # where the date row stops
+BAGGAGE_GAP_MM = 8.8              # above the baggage row
+CARD_TAIL_MM = 5.1                # below the last row, to the card foot
 
 # Passengers
 PAX_LABEL_BASE_MM = 117.5
@@ -68,7 +70,7 @@ PAX_CELL_INSET_MM = 4.2
 PAX_COLUMNS = (
     ("PASSENGER", 0.2578),
     ("SECTOR", 0.1220),
-    ("TICKET NO.", 0.1800),
+    ("PNR", 0.1800),
     ("SEAT", 0.0850),
     ("MEAL", 0.0900),
     ("BARCODE", 0.2652),
@@ -308,15 +310,12 @@ def draw_flight(t, flight, index, total):
     has_baggage = bool(_fmt(flight.get("checkin_bag"), "") or _fmt(flight.get("hand_bag"), ""))
     has_terminal = bool((flight.get("from_terminal") or "").strip()
                         or (flight.get("to_terminal") or "").strip())
+    # The card is only as tall as the rows it actually has.
+    content_end = (TERMINAL_TOP_MM + TERMINAL_H_MM) if has_terminal else DATE_BLOCK_END_MM
+    baggage_base_mm = content_end + BAGGAGE_GAP_MM
     if has_baggage:
-        card_mm = CARD_H_BAGGAGE_MM
-    elif has_terminal:
-        # The short card stops above the terminal pills, so it is taken down
-        # to clear them.
-        card_mm = TERMINAL_TOP_MM + TERMINAL_H_MM + 5.0
-    else:
-        card_mm = CARD_H_PLAIN_MM
-    card_h = card_mm * MM
+        content_end = baggage_base_mm
+    card_h = (content_end + CARD_TAIL_MM) * MM
 
     t.space(card_h + 8 * MM)
     if index == 0:
@@ -408,7 +407,7 @@ def draw_flight(t, flight, index, total):
                size=8, pad=pad, height=TERMINAL_H_MM * MM)
 
     if has_baggage:
-        baggage_base = below(BAGGAGE_BASE_MM)
+        baggage_base = below(baggage_base_mm)
         t.text(left_x, baggage_base, "Baggage", size=9, color=MUTED)
         detail = "  \u00b7  ".join(
             part for part in (
@@ -466,7 +465,7 @@ def draw_passengers(t, passengers, flights):
         cells = [
             (xs[0], widths[0], f"{index + 1}.&nbsp;&nbsp;{escape(name)}", True, INK, 9.5),
             (xs[1], widths[1], sectors, False, MUTED, 9.5),
-            (xs[2], widths[2], escape(pax.get("ticket_no") or "\u2014"), False, MUTED, 9.5),
+            (xs[2], widths[2], escape(pax.get("pnr") or "\u2014"), False, MUTED, 9.5),
             (xs[3], widths[3], seat_text, False, MUTED, 9.5),
             (xs[4], widths[4], meal_text, False, MUTED, 9.5),
         ]
@@ -475,7 +474,7 @@ def draw_passengers(t, passengers, flights):
             _, h = Paragraph(html, cell_style(bold, size)).wrap(width - PAX_CELL_INSET_MM * MM, 200)
             tallest = max(tallest, h)
         payload = re.sub(r"[^A-Za-z0-9\-]", "",
-                         pax.get("ticket_no") or pax.get("name") or "TICKET")[:18]
+                         f"{pax.get('pnr') or 'TICKET'}-{index + 1}")[:18]
         # The measured row fits one line; anything taller sets its own height.
         rows.append((cells, max(PAX_ROW_H_MM * MM, tallest + 2 * (PAX_ROW_DY_MM - 2.9) * MM), payload))
 

@@ -412,37 +412,31 @@ def draw_passengers(t, passengers, flights):
     t.y -= 12
 
 
-def draw_fares(t, items, total_str, *, payment, gst_company, gstin):
-    """Breakdown and total share one right-aligned column.
-
-    The total used to sit in its own block on the far right, reading as a
-    separate figure from the breakdown it totals.
-    """
-    t.space(90)
+def draw_fares(t, total_str, *, payment, gst_company, gstin):
+    """Just the amount paid: the ticket states what was charged, not how it
+    was arrived at. The label shares the amount's baseline so the two are
+    read back as a single line."""
+    t.space(64)
     left = MARGIN + 14
     right = PAGE_W - MARGIN - 14
-    t.y -= 2
 
-    for label, value in items:
-        t.text(left, t.y, label, size=8, color=MUTED)
-        t.text(right, t.y, value, size=8.6, font="Helvetica-Bold", color=INK, align="right")
-        t.y -= 14
+    t.rule(MARGIN, t.y + 4, CONTENT_W)
+    t.y -= 22
 
-    t.rule(left, t.y + 6, right - left)
-    t.y -= 14
-
-    # Same baseline as the amount, so the two extract as one line: the label
-    # and value were landing on separate lines and the total could not be read
-    # back off our own ticket.
-    t.tracked(left, t.y, "Amount Paid")
+    label = "Amount Paid"
+    value_w = t.c.stringWidth(total_str, "Helvetica-Bold", 17)
+    label_w = t.c.stringWidth(label.upper(), "Helvetica-Bold", 7.2) + len(label) * 1.5
+    t.tracked(right - value_w - 16 - label_w, t.y, label)
     t.text(right, t.y, total_str, size=17, font="Helvetica-Bold", color=INK, align="right")
 
-    t.y -= 16
+    details = []
     if payment:
-        t.text(left, t.y, f"Paid via {payment}", size=7.6, color=MUTED)
+        details.append(f"Paid via {payment}")
     if gstin:
-        t.text(right, t.y, f"GSTIN {gstin}" + (f"  ·  {gst_company}" if gst_company else ""),
-               size=7.6, color=MUTED, align="right")
+        details.append(f"GSTIN {gstin}" + (f"  \u00b7  {gst_company}" if gst_company else ""))
+    if details:
+        t.y -= 15
+        t.text(left, t.y, "  \u00b7  ".join(details), size=7.6, color=MUTED)
     t.y -= 16
 
 

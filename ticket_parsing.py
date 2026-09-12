@@ -485,6 +485,9 @@ def _parse_own_current(text):
     # cannot be recovered. The only address on the page is the agency's, and
     # returning that would quietly refill it as the customer's.
 
+    # Only the total is printed on the ticket now; the base/tax split is
+    # not there to recover. Tickets issued before that change carried the
+    # breakdown, and these patterns still read it when present.
     for key, pattern in (
         ("base_fare", r"Base Fare\s+" + MONEY_RE),
         ("taxes_fees", r"Airline Taxes(?:\s*&\s*Fees)?\s+" + MONEY_RE),

@@ -1498,23 +1498,8 @@ def generate_ticket():
     t.section("Passengers")
     draw_passengers(t, passengers, flights)
 
-    fare_items = [
-        ("Base Fare", format_money(base_fare)),
-        ("Airline Taxes & Fees", format_money(taxes)),
-        ("Insurance", format_money(insurance)),
-        ("Meals", format_money(meals_fee)),
-        ("Baggage", format_money(baggage_fee)),
-        ("Seats", format_money(seats_fee)),
-        ("Zero Cancel", format_money(zero_cancel)),
-        ("Discount", format_money(-discount)),
-    ]
-    amounts = [base_fare, taxes, insurance, meals_fee, baggage_fee, seats_fee, zero_cancel, discount]
-    fare_items = [item for item, amount in zip(fare_items, amounts)
-                  if amount or item[0] in ("Base Fare", "Airline Taxes & Fees")]
-
-    t.section("Fare")
     payment_label = payment_method + (f" ending {card_last_4}" if card_last_4 else "")
-    draw_fares(t, fare_items, total_fare_str, payment=payment_label,
+    draw_fares(t, total_fare_str, payment=payment_label,
                gst_company=gst_company, gstin=gstin)
 
     draw_footer(

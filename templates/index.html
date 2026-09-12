@@ -512,16 +512,27 @@ function toggleCard() {
 function formatTime12(t){if(!t)return'';const[h,m]=t.split(':').map(Number);return(h%12||12)+':'+String(m).padStart(2,'0')+(h>=12?' PM':' AM')}
 function calcDur(depId,arrId,durId){
     const d=document.getElementById(depId).value,a=document.getElementById(arrId).value;
-    if(d&&a){
-        const[dh,dm]=d.split(':').map(Number),[ah,am]=a.split(':').map(Number);
-        let td=dh*60+dm,ta=ah*60+am;
-        if(ta<td)ta+=1440;
-        const diff=ta-td;
-        const text=Math.floor(diff/60)+'h '+diff%60+'m';
-        document.getElementById(durId).value=text;
-        const label=document.getElementById(durId+'_label')||document.getElementById(durId.replace('fdur_','fdur_label_'));
-        if(label)label.textContent='Duration: '+text+(ta>=1440?' (next day)':'');
+    if(!d||!a)return;
+    const i=durId.replace('fdur_','');
+    const label=document.getElementById('fdur_label_'+i);
+    if(!label)return;
+
+    // Times are local to each airport, so the clock difference is only the
+    // real flight time when both sit in the same timezone. Across timezones
+    // the server works it out properly; showing a figure here would contradict
+    // the ticket.
+    const fromTz=(document.getElementById('fc_'+i)||{}).dataset?.tz||'';
+    const toTz=(document.getElementById('tc_'+i)||{}).dataset?.tz||'';
+    if(fromTz&&toTz&&fromTz!==toTz){
+        label.textContent='Duration calculated on the ticket (crosses timezones)';
+        return;
     }
+
+    const[dh,dm]=d.split(':').map(Number),[ah,am]=a.split(':').map(Number);
+    let td=dh*60+dm,ta=ah*60+am;
+    if(ta<td)ta+=1440;
+    const diff=ta-td;
+    label.textContent='Duration: '+Math.floor(diff/60)+'h '+diff%60+'m'+(ta>=1440?' (next day)':'');
 }
 
 function toggleAncillaries(){
@@ -542,6 +553,12 @@ function toggleExtras(i){
 // ─── Airport autocomplete ─────────────────────────────────
 // City and airline are derived from the code and flight number, so their
 // inputs stay hidden until detection fails and the user must supply them.
+// Picking an airport can change whether the route crosses timezones.
+function refreshDuration(inputId){
+    const i=inputId.replace(/^(fc|tc)_/,'');
+    calcDur('fdep_'+i,'farr_'+i,'fdur_'+i);
+}
+
 function setCityVisible(cityId,show){
     const wrap=document.getElementById(cityId.replace(/^(f|t)city_/,'$1city_wrap_'));
     if(wrap)wrap.hidden=!show;
@@ -563,10 +580,10 @@ function setupAC(inputId,listId,helperId,cityId){
                 data.forEach(item=>{
                     const div=document.createElement('div');div.className='autocomplete-item';
                     div.innerHTML=`<span class="ac-code">${item.code}</span><div class="ac-info"><div class="ac-city">${item.city}</div><div class="ac-airport">${item.airport}</div></div><span class="ac-country">${item.country}</span>`;
-                    div.onclick=()=>{input.value=item.code;cityInput.value=item.city;helper.textContent='✓ '+item.city+' — '+item.airport;helper.className='helper detected';list.classList.remove('visible');setCityVisible(cityId,false)};
+                    div.onclick=()=>{input.value=item.code;input.dataset.tz=item.tz||'';cityInput.value=item.city;helper.textContent='✓ '+item.city+' — '+item.airport;helper.className='helper detected';list.classList.remove('visible');setCityVisible(cityId,false);refreshDuration(inputId)};
                     list.appendChild(div);
                 });
-                if(v.length===3){const ex=data.find(r=>r.code===v.toUpperCase());if(ex){cityInput.value=ex.city;helper.textContent='✓ '+ex.city+' — '+ex.airport;helper.className='helper detected';list.classList.remove('visible');setCityVisible(cityId,false);return}}
+                if(v.length===3){const ex=data.find(r=>r.code===v.toUpperCase());if(ex){input.dataset.tz=ex.tz||'';cityInput.value=ex.city;helper.textContent='✓ '+ex.city+' — '+ex.airport;helper.className='helper detected';list.classList.remove('visible');setCityVisible(cityId,false);refreshDuration(inputId);return}}
                 list.classList.add('visible');
             } else {
                 list.classList.remove('visible');

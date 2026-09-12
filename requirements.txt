@@ -11,3 +11,4 @@ gunicorn
 # binary installed (see README). Uploads fall back to manual entry without it.
 pytesseract
 PyMuPDF
+airportsdata

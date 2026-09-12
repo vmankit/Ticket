@@ -17,6 +17,7 @@ from html import escape
 import urllib.error
 import urllib.request
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 from functools import lru_cache
 from openpyxl import Workbook, load_workbook
 from werkzeug.exceptions import HTTPException
@@ -335,13 +336,53 @@ def parse_datetime_local(value):
     return None
 
 
-def compute_duration(dep_raw, arr_raw):
-    """"10:00","12:10" -> "2h 10m", wrapping past midnight."""
+@lru_cache(maxsize=None)
+def _iata_timezones():
+    """IATA code -> IANA timezone. Empty when the dataset is unavailable."""
+    try:
+        import airportsdata
+
+        return {code: entry["tz"] for code, entry in airportsdata.load("IATA").items()
+                if entry.get("tz")}
+    except Exception:
+        log.warning("airportsdata unavailable - flight durations will assume one timezone.")
+        return {}
+
+
+def airport_timezone(code):
+    return _iata_timezones().get((code or "").strip().upper())
+
+
+def compute_duration(dep_raw, arr_raw, from_code="", to_code="", travel_date=""):
+    """Flight time between two airports, as "2h 10m".
+
+    Departure and arrival are quoted in each airport's own local time, so
+    subtracting the clock times is only right when both share a timezone.
+    Across timezones it is wrong by the offset between them — Mumbai to
+    London read 4h 45m for a 9h 15m flight.
+    """
     try:
         dep = datetime.strptime((dep_raw or "").strip(), "%H:%M")
         arr = datetime.strptime((arr_raw or "").strip(), "%H:%M")
     except ValueError:
         return ""
+
+    from_tz, to_tz = airport_timezone(from_code), airport_timezone(to_code)
+    if from_tz and to_tz and from_tz != to_tz:
+        try:
+            day = datetime.strptime((travel_date or "").strip(), "%Y-%m-%d").date()
+        except ValueError:
+            day = datetime.now().date()
+        try:
+            departure = datetime.combine(day, dep.time(), tzinfo=ZoneInfo(from_tz))
+            arrival = datetime.combine(day, arr.time(), tzinfo=ZoneInfo(to_tz))
+            while arrival <= departure:
+                arrival += timedelta(days=1)
+            minutes = int((arrival - departure).total_seconds() // 60)
+            return f"{minutes // 60}h {minutes % 60}m"
+        except Exception as exc:
+            log.warning("Timezone-aware duration failed (%s); using clock difference.", exc)
+
     minutes = int((arr - dep).total_seconds() // 60) % (24 * 60)
     return f"{minutes // 60}h {minutes % 60}m"
 
@@ -927,6 +968,9 @@ def search_airports():
             "city": info["city"],
             "airport": info["airport"],
             "country": info.get("country", ""),
+            # Lets the page tell whether a route crosses timezones, and so
+            # whether its clock-difference estimate would be misleading.
+            "tz": airport_timezone(code) or "",
             "priority": priority
         })
     
@@ -1285,9 +1329,11 @@ def generate_ticket():
         # client without JS produces a ticket with no flight times on it.
         dep_time = request.form.get(f"{prefix}dep_time", "") or to_12_hour(dep_time_raw)
         arr_time = request.form.get(f"{prefix}arr_time", "") or to_12_hour(arr_time_raw)
-        # Also JavaScript-filled, so derive it when absent.
-        duration = request.form.get(f"{prefix}duration", "") or compute_duration(
-            dep_time_raw, arr_time_raw)
+        # Always computed here rather than taking the submitted value: the
+        # browser only subtracts clock times and has no timezone data, so it
+        # would override the correct figure on international routes.
+        duration = compute_duration(dep_time_raw, arr_time_raw,
+                                    from_code, to_code, travel_date)
         travel_class = request.form.get(f"{prefix}class", "Economy")
         seat = request.form.get(f"{prefix}seat", "")
         meal = request.form.get(f"{prefix}meal", "Not selected")
@@ -1508,10 +1554,11 @@ def generate_ticket():
         issued=f"Issued {issued_at.strftime('%d %b %Y, %H:%M')} IST"
                f"  ·  {fare_type}  ·  {refund_status}",
         contact_line=f"{agency_email}  ·  {agency_phone}",
-        terms="Carry a valid government-issued photo ID for every passenger. Check-in usually "
-              "closes 60 minutes before departure (3 hours for international). All times are "
-              "local to each airport. Quote the airline PNR to the airline, and the Booking ID "
-              "to us.",
+        terms="Show your barcode at the airport entry gate — it covers every flight on this "
+              "ticket. Carry a valid government-issued photo ID. Check your baggage allowance "
+              "and airline-specific requirements before heading to the airport. The PNR and "
+              "ticket number above are your proof of purchase — keep this document handy until "
+              "after travel.",
     )
 
     t.save()

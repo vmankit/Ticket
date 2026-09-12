@@ -925,7 +925,7 @@ print(f"[Bharat Horizon Travels] Loaded {len(airline_payload())} airline code ma
 
 @app.route("/")
 def index():
-    return render_template("index.html")
+    return render_template("index.html", fare_types=FARE_TYPES)
 
 
 @app.route("/api/search-airports", methods=["GET"])
@@ -1131,6 +1131,13 @@ def test_extract():
 MAX_BARCODE_BYTES = 4 * 1024 * 1024
 
 TICKET_STATUSES = ("Confirmed", "On Hold", "Waitlisted", "Cancelled", "Refunded")
+# Printed on the ticket and recorded in the tracker, so the list is fixed here
+# rather than trusting whatever the form posts back.
+FARE_TYPES = (
+    "REGULAR", "SAVER", "FLEXI", "NDC FARE", "SME FARE", "CORPORATE FARE",
+    "STUDENT FARE", "SENIOR CITIZEN FARE", "ARMED FORCES FARE",
+    "SPECIAL FARE", "RETAIL FARE", "TOUR FARE",
+)
 PASSENGER_TITLES = ("Mr", "Mrs", "Ms", "Mstr", "Dr")
 PASSENGER_TYPES = ("Adult", "Child", "Infant")
 
@@ -1271,7 +1278,9 @@ def generate_ticket():
     customer_email = request.form.get("customer_email", "").strip()
     
     refund_status = request.form.get("refund_status", "Refundable")
-    fare_type = request.form.get("fare_type", "REGULAR")
+    fare_type = request.form.get("fare_type", "REGULAR").strip().upper()
+    if fare_type not in FARE_TYPES:
+        fare_type = "REGULAR"
     booking_platform = request.form.get("booking_platform", "Direct")
     is_dummy = request.form.get("is_dummy") == "true"
 

@@ -287,10 +287,8 @@
                         <div class="form-group">
                             <label>Fare Type</label>
                             <select name="fare_type">
-                                <option value="REGULAR">REGULAR</option>
-                                <option value="STUDENT FARE">STUDENT FARE</option>
-                                <option value="SPECIAL FARE">SPECIAL FARE</option>
-                                <option value="RETAIL FARE">RETAIL FARE</option>
+                                {% for ft in fare_types %}<option value="{{ ft }}">{{ ft }}</option>
+                                {% endfor %}
                             </select>
                         </div>
                         <div class="form-group">
@@ -327,7 +325,7 @@
                         <div class="form-group" style="grid-column:1/-1">
                             <label>Remarks</label>
                             <input type="text" name="remarks" maxlength="200"
-                                   placeholder="e.g. Paid via UPI · Corporate booking · Reissued">
+                                   placeholder="e.g. Paid via UPI · Reissued on 10 Sep · Infant travelling on lap">
                             <div class="helper">Printed under the amount on the ticket, and saved to the tracker.</div>
                         </div>
                     </div>

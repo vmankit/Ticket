@@ -412,7 +412,7 @@ def draw_passengers(t, passengers, flights):
     t.y -= 12
 
 
-def draw_fares(t, total_str, *, payment, gst_company, gstin):
+def draw_fares(t, total_str, *, remarks, gst_company, gstin):
     """Just the amount paid: the ticket states what was charged, not how it
     was arrived at. The label shares the amount's baseline so the two are
     read back as a single line."""
@@ -430,13 +430,15 @@ def draw_fares(t, total_str, *, payment, gst_company, gstin):
     t.text(right, t.y, total_str, size=17, font="Helvetica-Bold", color=INK, align="right")
 
     details = []
-    if payment:
-        details.append(f"Paid via {payment}")
+    if remarks:
+        details.append(remarks)
     if gstin:
         details.append(f"GSTIN {gstin}" + (f"  \u00b7  {gst_company}" if gst_company else ""))
     if details:
         t.y -= 15
-        t.text(left, t.y, "  \u00b7  ".join(details), size=7.6, color=MUTED)
+        # Free text, so it has to wrap rather than run off the page.
+        t.y -= t.paragraph(left, t.y + 8, CONTENT_W - 28,
+                           escape("  \u00b7  ".join(details)), size=7.6) - 8
     t.y -= 16
 
 

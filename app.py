@@ -1290,6 +1290,10 @@ def generate_ticket():
     # after the fact and has to carry the time it was actually issued.
     issued_at = parse_datetime_local(request.form.get("issued_at")) or datetime.now()
 
+    # Free text printed under the amount. Replaces the automatic "Paid via X"
+    # line, so whatever goes there is chosen rather than assumed.
+    remarks = " ".join(request.form.get("remarks", "").split())[:200]
+
     # Format booking date
     try:
         bd_obj = datetime.strptime(booking_date, "%Y-%m-%d")
@@ -1544,8 +1548,7 @@ def generate_ticket():
     t.section("Passengers")
     draw_passengers(t, passengers, flights)
 
-    payment_label = payment_method + (f" ending {card_last_4}" if card_last_4 else "")
-    draw_fares(t, total_fare_str, payment=payment_label,
+    draw_fares(t, total_fare_str, remarks=remarks,
                gst_company=gst_company, gstin=gstin)
 
     draw_footer(
@@ -1566,7 +1569,10 @@ def generate_ticket():
     
     # ── Save Tracking to Excel ──────────────────────────────────
     lead_pax = passengers[0]["name"] if passengers else "Unknown"
-    gst_note = f"GST: {gst_company} ({gstin})" if gstin else ""
+    notes = "  |  ".join(part for part in (
+        remarks,
+        f"GST: {gst_company} ({gstin})" if gstin else "",
+    ) if part)
     flight_nos = ", ".join(f["flight_no"] for f in flights)
     travel_date_val = flights[0]["date"] if flights else ""
     dep_time_val = flights[0]["dep_time"] if flights else ""
@@ -1588,7 +1594,7 @@ def generate_ticket():
         fare_type,
         refund_status,
         ticket_status,
-        gst_note,
+        notes,
     ]
     if not is_dummy:
         try:

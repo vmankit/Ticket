@@ -111,15 +111,32 @@ def _drop_retired_columns(ws):
     """Remove columns the app no longer records, keeping older rows aligned.
 
     Payment mode used to be tracked per booking. It is gone from the form, so
-    an existing tracker still carrying the column would push every new row one
-    cell to the left. Dropping it once keeps old and new rows in the same
-    shape; the values it held are still in the file's git history.
+    a tracker still carrying the column would push every new row one cell to
+    the left. Dropping it is a one-time migration - but the column holds real
+    history for bookings already taken, so each row's value is folded into its
+    Notes cell before the column goes, rather than being thrown away.
     """
     retired = {"Payment Mode"}
     headers = [cell.value for cell in ws[1]] if ws.max_row else []
+    notes_idx = headers.index("Notes") + 1 if "Notes" in headers else None
+
     for idx in range(len(headers), 0, -1):
-        if headers[idx - 1] in retired:
-            ws.delete_cols(idx)
+        if headers[idx - 1] not in retired:
+            continue
+        if notes_idx:
+            for row in range(2, ws.max_row + 1):
+                value = str(ws.cell(row=row, column=idx).value or "").strip()
+                if not value:
+                    continue
+                note = str(ws.cell(row=row, column=notes_idx).value or "").strip()
+                carried = f"Paid via {value}"
+                if carried.lower() in note.lower():
+                    continue
+                ws.cell(row=row, column=notes_idx,
+                        value=f"{note}  |  {carried}" if note else carried)
+        ws.delete_cols(idx)
+        if notes_idx and notes_idx > idx:
+            notes_idx -= 1
 
 
 def save_to_excel(data):

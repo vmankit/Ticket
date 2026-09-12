@@ -238,27 +238,14 @@ def draw_flight(t, flight, index, total):
     t.c.rect(MARGIN, top - head_h, CONTENT_W, head_h / 2, stroke=0, fill=1)
     t.c.restoreState()
 
+    # A monochrome code badge rather than the carrier's logo: it keeps the
+    # ticket to one palette, and needs no third-party image to load.
     code = (flight.get("airline_code") or "")[:2].upper() or "--"
     badge_y = top - head_h + 9
-    logo = flight.get("logo_bytes")
-    if logo:
-        # Real carrier logo when it could be fetched; the code badge otherwise.
-        try:
-            t.c.saveState()
-            t.c.setFillColor(white)
-            t.c.setStrokeColor(LINE)
-            t.c.setLineWidth(0.6)
-            t.c.roundRect(MARGIN + 15, badge_y, 18, 18, 5, stroke=1, fill=1)
-            t.c.drawImage(ImageReader(io.BytesIO(logo)), MARGIN + 16.5, badge_y + 1.5,
-                          width=15, height=15, mask="auto", preserveAspectRatio=True)
-            t.c.restoreState()
-        except Exception:
-            logo = None
-    if not logo:
-        t.c.setFillColor(INK)
-        t.c.circle(MARGIN + 24, badge_y + 8, 8, stroke=0, fill=1)
-        t.text(MARGIN + 24, badge_y + 5.4, code, size=6.4, font="Helvetica-Bold",
-               color=white, align="center")
+    t.c.setFillColor(INK)
+    t.c.circle(MARGIN + 24, badge_y + 8, 8, stroke=0, fill=1)
+    t.text(MARGIN + 24, badge_y + 5.4, code, size=6.4, font="Helvetica-Bold",
+           color=white, align="center")
 
     airline = (flight.get("airline") or "").upper()
     title = f"{airline}  ·  {flight.get('flight_no', '')}".strip(" ·")

@@ -46,8 +46,6 @@
         /* This is the confirmation that auto-detection worked, so it has to be
            readable rather than fine print. */
         .form-group .helper.detected{color:var(--success);font-weight:700;font-size:.73rem}
-        .airline-match{display:flex;align-items:center;gap:7px;margin-top:4px}
-        .airline-logo{width:24px;height:24px;object-fit:contain;border:1px solid var(--border);border-radius:6px;background:#fff;padding:2px}
 
         .separator{height:1px;background:var(--border);margin:8px 0 24px}
         .link-toggle{background:none;border:none;color:var(--accent);font-weight:700;
@@ -258,6 +256,11 @@
                         <div class="form-group">
                             <label>Booking Date</label>
                             <input type="date" name="booking_date" id="booking_date">
+                        </div>
+                        <div class="form-group">
+                            <label>Issued On <span class="auto-tag">Auto</span></label>
+                            <input type="datetime-local" name="issued_at" id="issuedAt" class="auto-field">
+                            <div class="helper">Printed on the ticket. Change it to stamp a different time.</div>
                         </div>
                         <div class="form-group">
                             <label>Refund Status</label>
@@ -796,24 +799,8 @@ function detectAirline(input,idx){
         alInput.classList.add('auto-field');
         if(alTag)alTag.hidden=false;
         const codeLabel=info.iata&&info.iata!==prefix?`${prefix} / ${info.iata}`:prefix;
-        helper.innerHTML=`<span class="airline-match"><span>✓ ${info.name} (${codeLabel})</span></span>`;
+        helper.textContent=`✓ ${info.name} (${codeLabel})`;
         helper.className='helper detected';
-        // Walk the providers rather than hiding on the first failure, which
-        // is why no logo ever appeared once one provider stopped serving.
-        const sources=info.logos||(info.logo?[info.logo]:[]);
-        if(sources.length){
-            const img=document.createElement('img');
-            img.className='airline-logo';
-            img.alt=info.name+' logo';
-            let attempt=0;
-            img.onerror=()=>{
-                attempt++;
-                if(attempt<sources.length){ img.src=sources[attempt]; }
-                else { img.remove(); }
-            };
-            img.src=sources[0];
-            helper.querySelector('.airline-match').prepend(img);
-        }
     }
     else{
         // Detection failed, so hand the field back to the user rather than
@@ -1149,6 +1136,12 @@ document.addEventListener('DOMContentLoaded', () => {
     setupCollapsibleCards();
     calcTotal();
     document.getElementById('booking_date').value=new Date().toISOString().split('T')[0];
+    // Local time, not toISOString(), which would stamp UTC.
+    const now=new Date();
+    const pad=n=>String(n).padStart(2,'0');
+    document.getElementById('issuedAt').value=
+        `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}`+
+        `T${pad(now.getHours())}:${pad(now.getMinutes())}`;
     addFlight();     // First flight
     addPassenger();  // First passenger
     

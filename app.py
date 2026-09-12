@@ -34,6 +34,15 @@ except ImportError:
 from airports_data import AIRPORTS_DB
 from excel_tracker import get_next_booking_id, save_to_excel
 from utils import generate_qr, generate_ticket_number
+from ticket_pdf import (
+    TicketCanvas,
+    draw_fares,
+    draw_flight,
+    draw_footer,
+    draw_header,
+    draw_layover,
+    draw_passengers,
+)
 from ticket_parsing import (
     looks_like_own_ticket,
     normalize_text,
@@ -334,6 +343,17 @@ def parse_date_str(value):
         except ValueError:
             continue
     return ""
+
+
+def compute_duration(dep_raw, arr_raw):
+    """"10:00","12:10" -> "2h 10m", wrapping past midnight."""
+    try:
+        dep = datetime.strptime((dep_raw or "").strip(), "%H:%M")
+        arr = datetime.strptime((arr_raw or "").strip(), "%H:%M")
+    except ValueError:
+        return ""
+    minutes = int((arr - dep).total_seconds() // 60) % (24 * 60)
+    return f"{minutes // 60}h {minutes % 60}m"
 
 
 def to_12_hour(raw):
@@ -1271,7 +1291,9 @@ def generate_ticket():
         # client without JS produces a ticket with no flight times on it.
         dep_time = request.form.get(f"{prefix}dep_time", "") or to_12_hour(dep_time_raw)
         arr_time = request.form.get(f"{prefix}arr_time", "") or to_12_hour(arr_time_raw)
-        duration = request.form.get(f"{prefix}duration", "")
+        # Also JavaScript-filled, so derive it when absent.
+        duration = request.form.get(f"{prefix}duration", "") or compute_duration(
+            dep_time_raw, arr_time_raw)
         travel_class = request.form.get(f"{prefix}class", "Economy")
         seat = request.form.get(f"{prefix}seat", "")
         meal = request.form.get(f"{prefix}meal", "Not selected")
@@ -1469,596 +1491,52 @@ def generate_ticket():
     # PDF GENERATION
     # ══════════════════════════════════════════════════════════
     buffer = io.BytesIO()
-    width, height = A4
-    c = canvas.Canvas(buffer, pagesize=A4)
+    t = TicketCanvas(buffer)
 
-    # Modern ticket theme
-    PRIMARY = HexColor("#0f2742")
-    PRIMARY_DARK = HexColor("#081727")
-    ACCENT = HexColor("#0e9488")
-    ACCENT_SOFT = HexColor("#e7f7f5")
-    LIGHT_BG = HexColor("#f5f8fb")
-    WHITE = white
-    DARK = HexColor("#162033")
-    GRAY = HexColor("#667085")
-    BORDER = HexColor("#d9e0ea")
-    GREEN = HexColor("#14845f")
-    GOLD = HexColor("#b7791f")
-    DANGER = HexColor("#c24135")
+    draw_header(t, company=COMPANY, pnr=pnr, booking_id=booking_id, status=ticket_status)
 
-    margin = 40
-    usable_w = width - 2 * margin
-    y = height - 30
+    t.section("Itinerary")
+    for index, flight in enumerate(flights):
+        if index and flight.get("layover"):
+            draw_layover(t, f"{flight['layover']} in {flight.get('from_city') or flight.get('from_code')}")
+        draw_flight(t, flight, index, len(flights))
 
-    def draw_rounded_rect(x, y, w, h, r, fill_color=None, stroke_color=None):
-        c.saveState()
-        if fill_color:
-            c.setFillColor(fill_color)
-        if stroke_color:
-            c.setStrokeColor(stroke_color)
-            c.setLineWidth(0.5)
-        p = c.beginPath()
-        p.moveTo(x + r, y); p.lineTo(x + w - r, y)
-        p.arcTo(x + w - r, y, x + w, y + r, -90, 90)
-        p.lineTo(x + w, y + h - r)
-        p.arcTo(x + w - r, y + h - r, x + w, y + h, 0, 90)
-        p.lineTo(x + r, y + h)
-        p.arcTo(x, y + h - r, x + r, y + h, 90, 90)
-        p.lineTo(x, y + r)
-        p.arcTo(x, y, x + r, y + r, 180, 90)
-        p.close()
-        if fill_color and stroke_color:
-            c.drawPath(p, fill=1, stroke=1)
-        elif fill_color:
-            c.drawPath(p, fill=1, stroke=0)
-        else:
-            c.drawPath(p, fill=0, stroke=1)
-        c.restoreState()
-
-    styles = getSampleStyleSheet()
-    cell_style = ParagraphStyle("cell", parent=styles["Normal"], fontSize=7.5, leading=10, textColor=DARK)
-    header_style = ParagraphStyle("header", parent=styles["Normal"], fontSize=7, leading=9, textColor=WHITE, fontName="Helvetica-Bold")
-    confirmed_style = ParagraphStyle("confirmed", parent=styles["Normal"], fontSize=7.5, leading=10, textColor=GREEN, fontName="Helvetica-Bold")
-
-    def draw_monogram(x, y, size, label="AT"):
-        draw_rounded_rect(x, y, size, size, 8, fill_color=ACCENT)
-        c.setFillColor(WHITE)
-        c.setFont("Helvetica-Bold", 13)
-        c.drawCentredString(x + size / 2, y + size / 2 - 4, label)
-
-    def draw_pill(x, y, text, fill_color, text_color=WHITE, pad_x=9):
-        c.setFont("Helvetica-Bold", 7)
-        tw = c.stringWidth(text, "Helvetica-Bold", 7)
-        w = tw + pad_x * 2
-        draw_rounded_rect(x, y, w, 18, 9, fill_color=fill_color, stroke_color=fill_color)
-        c.setFillColor(text_color)
-        c.drawCentredString(x + w / 2, y + 6, text)
-        return w
-
-    def draw_label_value(x, y, label, value, max_chars=28, value_color=DARK):
-        c.setFillColor(GRAY)
-        c.setFont("Helvetica", 6.8)
-        c.drawString(x, y, label.upper())
-        c.setFillColor(value_color)
-        c.setFont("Helvetica-Bold", 9)
-        value = str(value or "")
-        c.drawString(x, y - 13, value[:max_chars])
-
-    def draw_section_heading(title, y_pos):
-        c.setFillColor(PRIMARY)
-        c.setFont("Helvetica-Bold", 9.5)
-        c.drawString(margin + 2, y_pos, title)
-        c.setStrokeColor(BORDER)
-        c.setLineWidth(0.6)
-        c.line(margin, y_pos - 6, margin + usable_w, y_pos - 6)
-
-    def airline_logo_flowable(code, size=23):
-        logo_bytes = fetch_airline_logo_bytes(code)
-        if not logo_bytes:
-            return None
-        try:
-            return Image(io.BytesIO(logo_bytes), width=size, height=size)
-        except Exception:
-            return None
-
-    def draw_qr_box(x, y, data, caption):
-        qr_img = Image(generate_qr(data), width=46, height=46)
-        draw_rounded_rect(x, y, 58, 68, 8, fill_color=WHITE, stroke_color=BORDER)
-        qr_img.drawOn(c, x + 6, y + 18)
-        c.setFillColor(GRAY)
-        c.setFont("Helvetica-Bold", 5.7)
-        c.drawCentredString(x + 29, y + 7, caption[:18])
-
-    # ══════════════════════════════════════════════════════════
-    # HEADER
-    # ══════════════════════════════════════════════════════════
-    header_h = 92
-    y -= header_h
-    draw_rounded_rect(margin, y, usable_w, header_h, 10, fill_color=PRIMARY_DARK)
-    c.setFillColor(ACCENT)
-    c.rect(margin, y, usable_w, 4, stroke=0, fill=1)
-
-    draw_monogram(margin + 18, y + 30, 42)
-
-    c.setFillColor(WHITE)
-    c.setFont("Helvetica-Bold", 19)
-    c.drawString(margin + 72, y + 58, COMPANY["name"])
-    c.setFillColor(HexColor("#b8c7d8"))
-    c.setFont("Helvetica", 8)
-    c.drawString(margin + 72, y + 34, f"{agency_email}  /  {agency_phone}")
-    c.drawString(margin + 72, y + 20, f"{COMPANY['address']} - {COMPANY['pincode']}")
-
-    # E-TICKET badge
-    bw, bh = 122, 48
-    bx = margin + usable_w - bw - 18
-    by = y + 25
-    draw_rounded_rect(bx, by, bw, bh, 9, fill_color=WHITE)
-    c.setFillColor(PRIMARY)
-    c.setFont("Helvetica-Bold", 15)
-    c.drawCentredString(bx + bw / 2, by + 27, "E-TICKET")
-    c.setFillColor(GREEN)
-    c.setFont("Helvetica-Bold", 7)
-    c.drawCentredString(bx + bw / 2, by + 12, "STATUS: CONFIRMED")
-
-    y -= 14
-
-    # ══════════════════════════════════════════════════════════
-    # ROUTE VISUAL
-    # ══════════════════════════════════════════════════════════
-    route_h = 82
-    y -= route_h
-    draw_rounded_rect(margin, y, usable_w, route_h, 10, fill_color=WHITE, stroke_color=BORDER)
-    c.setFillColor(LIGHT_BG)
-    c.rect(margin + 1, y + 1, usable_w - 2, 22, stroke=0, fill=1)
-
-    from_code = flights[0]["from_code"] if flights else "FROM"
-    to_code = flights[-1]["to_code"] if flights else "TO"
-    from_city = flights[0]["from_city"] or from_code if flights else ""
-    to_city = flights[-1]["to_city"] or to_code if flights else ""
-    travel_date_text = flights[0]["date"] if flights else ""
-
-    c.setFillColor(PRIMARY)
-    c.setFont("Helvetica-Bold", 8)
-    c.drawString(margin + 16, y + route_h - 17, "TRIP ROUTE")
-    draw_pill(margin + usable_w - 162, y + route_h - 20, f"{len(flights)} SEGMENT{'S' if len(flights) != 1 else ''}", ACCENT)
-
-    route_mid_y = y + 39
-    c.setStrokeColor(BORDER)
-    c.setLineWidth(2)
-    c.line(margin + 111, route_mid_y, margin + 300, route_mid_y)
-    c.setFillColor(ACCENT)
-    c.circle(margin + 111, route_mid_y, 5, stroke=0, fill=1)
-    c.circle(margin + 300, route_mid_y, 5, stroke=0, fill=1)
-    c.setStrokeColor(ACCENT)
-    c.setLineWidth(1.4)
-    c.line(margin + 123, route_mid_y, margin + 288, route_mid_y)
-    c.setFillColor(PRIMARY)
-    c.setFont("Helvetica-Bold", 23)
-    c.drawString(margin + 16, y + 33, from_code)
-    c.drawString(margin + 318, y + 33, to_code)
-    c.setFillColor(GRAY)
-    c.setFont("Helvetica", 7.2)
-    c.drawString(margin + 16, y + 22, from_city[:24])
-    c.drawString(margin + 318, y + 22, to_city[:24])
-    c.setFillColor(PRIMARY)
-    c.setFont("Helvetica-Bold", 8)
-    c.drawCentredString(margin + 205, y + 48, "NON-TRANSFERABLE")
-    c.setFillColor(GRAY)
-    c.setFont("Helvetica", 7)
-    c.drawCentredString(margin + 205, y + 27, travel_date_text)
-
-    draw_qr_box(
-        margin + usable_w - 78,
-        y + 7,
-        f"PNR:{pnr}|BOOKING:{booking_id}|ROUTE:{route_summary}|PAX:{len(passengers)}",
-        "PNR QR",
-    )
-
-    y -= 14
-
-    # ══════════════════════════════════════════════════════════
-    # BOOKING SUMMARY
-    # ══════════════════════════════════════════════════════════
-    section_h = 86
-    y -= section_h
-    draw_rounded_rect(margin, y, usable_w, section_h, 10, fill_color=LIGHT_BG, stroke_color=BORDER)
-
-    c.setFillColor(PRIMARY)
-    c.setFont("Helvetica-Bold", 9.5)
-    c.drawString(margin + 15, y + section_h - 18, "BOOKING SUMMARY")
-    status_colors = {
-        "Confirmed": GREEN, "On Hold": GOLD, "Waitlisted": GOLD,
-        "Cancelled": DANGER, "Refunded": GRAY,
-    }
-    status_label = ticket_status.upper()
-    status_width = c.stringWidth(status_label, "Helvetica-Bold", 7) + 18
-    draw_pill(
-        margin + usable_w - status_width - 15, y + section_h - 23,
-        status_label, status_colors.get(ticket_status, GREEN),
-    )
-
-    col_w = usable_w / 3
-    labels = [
-        ("Booking ID", booking_id),
-        ("Booking Date", booking_date_display),
-        ("PNR / Booking Ref", pnr),
-        ("Route", route_summary),
-        ("Fare Type", fare_type),
-        ("Refund Status", refund_status),
-    ]
-    for idx, (label, value) in enumerate(labels):
-        row = idx // 3
-        col = idx % 3
-        cx = margin + 15 + col * col_w
-        cy = y + section_h - 41 - (row * 28)
-        value_color = DANGER if label == "Refund Status" and "Non-Refundable" in value else DARK
-        draw_label_value(cx, cy, label, value, max_chars=24, value_color=value_color)
-
-    y -= 16
-
-    # ══════════════════════════════════════════════════════════
-    # FLIGHT DETAILS (supports multiple flights / layover)
-    # ══════════════════════════════════════════════════════════
-    y -= 4
-    draw_section_heading(f"FLIGHT DETAILS  ({len(flights)} Segment{'s' if len(flights) > 1 else ''})", y)
-    y -= 18
-
-    flight_headers = ["Flight No.", "Airline", "Departure", "Arrival", "Date", "Duration", "Class", "Seat / Meal / Baggage"]
-    flight_col_w = [usable_w * 0.10, usable_w * 0.18, usable_w * 0.16, usable_w * 0.15, usable_w * 0.12, usable_w * 0.08, usable_w * 0.10, usable_w * 0.11]
-
-    table_data = [[Paragraph(h, header_style) for h in flight_headers]]
-
-    for fi, fl in enumerate(flights):
-        checkin_txt = f"<br/><font size='5' color='#b7791f'>Check-in closes: {fl.get('checkin_closing', '')}</font>" if fl.get('checkin_closing') else ""
-        logo = airline_logo_flowable(fl.get("airline_code"), size=22)
-        airline_text = Paragraph(
-            f"<b>{fl['airline'] or 'Airline'}</b><br/><font size='6' color='#667085'>{fl.get('airline_code', '')}</font>",
-            cell_style,
-        )
-        if logo:
-            airline_cell = Table(
-                [[logo, airline_text]],
-                colWidths=[25, flight_col_w[1] - 25],
-                style=TableStyle([
-                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                    ("LEFTPADDING", (0, 0), (-1, -1), 0),
-                    ("RIGHTPADDING", (0, 0), (-1, -1), 2),
-                    ("TOPPADDING", (0, 0), (-1, -1), 0),
-                    ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
-                ]),
-            )
-        else:
-            airline_cell = airline_text
-        row = [
-            Paragraph(f"<b>{fl['flight_no']}</b>", cell_style),
-            airline_cell,
-            Paragraph(f"<b>{fl['from_full']}</b><br/><font color='#667085'>{fl['dep_time']}</font>{checkin_txt}", cell_style),
-            Paragraph(f"<b>{fl['to_full']}</b><br/><font color='#667085'>{fl['arr_time']}</font>", cell_style),
-            Paragraph(fl["date"], cell_style),
-            Paragraph(fl["duration"], cell_style),
-            Paragraph(fl["class"], cell_style),
-            Paragraph(
-                f"<b>Seat:</b> {fl.get('seat') or 'N/A'}<br/><b>Meal:</b> {fl.get('meal') or 'Not selected'}<br/><b>Bag:</b> {fl.get('checkin_bag') or 'Airline Default'} / {fl.get('hand_bag') or 'Airline Default'}",
-                cell_style,
-            ),
-        ]
-        table_data.append(row)
-
-        # Add layover row between flights
-        if fi < len(flights) - 1:
-            next_fl = flights[fi + 1]
-            layover_dur = next_fl.get("layover", "")
-            if layover_dur:
-                layover_text = f"{layover_dur} layover in {fl['to_city'] or fl['to_code']}"
-            else:
-                layover_text = f"Layover in {fl['to_city'] or fl['to_code']}"
-            layover_para = Paragraph(f'<font color="#b7791f"><b>{layover_text}</b></font>', cell_style)
-            layover_row = [layover_para] + [Paragraph("", cell_style)] * 6
-            table_data.append(layover_row)
-
-    t = Table(table_data, colWidths=flight_col_w)
-
-    style_cmds = [
-        ("BACKGROUND", (0, 0), (-1, 0), PRIMARY),
-        ("TEXTCOLOR", (0, 0), (-1, 0), WHITE),
-        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
-        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("FONTSIZE", (0, 0), (-1, 0), 7),
-        ("BACKGROUND", (0, 1), (-1, -1), WHITE),
-        ("BOX", (0, 0), (-1, -1), 0.6, BORDER),
-        ("INNERGRID", (0, 0), (-1, -1), 0.4, BORDER),
-        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [WHITE, HexColor("#fbfcfe")]),
-        ("TOPPADDING", (0, 0), (-1, -1), 7),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 7),
-        ("LEFTPADDING", (0, 0), (-1, -1), 4),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 4),
-    ]
-
-    # Color layover rows
-    row_idx = 1
-    for fi in range(len(flights)):
-        row_idx += 1
-        if fi < len(flights) - 1:
-            # Layover row
-            style_cmds.append(("BACKGROUND", (0, row_idx), (-1, row_idx), HexColor("#fff8ed")))
-            style_cmds.append(("SPAN", (0, row_idx), (-1, row_idx)))
-            row_idx += 1
-
-    t.setStyle(TableStyle(style_cmds))
-    tw, th = t.wrap(usable_w, 400)
-    y -= th
-    t.drawOn(c, margin, y)
-
-    y -= 16
-
-    # Show segment PNRs if provided (for multi-PNR connecting flights)
-    segment_pnrs = [(i+1, fl.get("segment_pnr")) for i, fl in enumerate(flights) if fl.get("segment_pnr")]
-    if segment_pnrs:
-        pnr_text = "Segment PNRs: " + " | ".join([f"Flight {seg}: {pnr}" for seg, pnr in segment_pnrs])
-        segment_pnr_para = Paragraph(f'<font size="7" color="#0f2742"><b>{pnr_text}</b></font>', cell_style)
-        segment_pnr_para.wrapOn(c, usable_w, 20)
-        segment_pnr_para.drawOn(c, margin, y)
-        y -= 14
-
-    # ══════════════════════════════════════════════════════════
-    # PASSENGER DETAILS
-    # ══════════════════════════════════════════════════════════
-    draw_section_heading("PASSENGER DETAILS", y)
-    
-    if customer_phone or customer_email:
-        c.setFillColor(GRAY); c.setFont("Helvetica", 8)
-        c.drawRightString(margin + usable_w - 5, y + 1, f"{customer_phone}  /  {customer_email}")
-        
-    y -= 18
-
-    pax_headers = ["No", "Passenger Name", "Sector", "Ticket Number", "Seat", "Meal", "Check-in\nBaggage", "Hand\nBaggage"]
-    pax_col_w = [usable_w * 0.05, usable_w * 0.22, usable_w * 0.12, usable_w * 0.15, usable_w * 0.10, usable_w * 0.12, usable_w * 0.14, usable_w * 0.10]
-
-    pax_table_data = [[Paragraph(h.replace("\n", "<br/>"), header_style) for h in pax_headers]]
-
-    for pi, pax in enumerate(passengers):
-        # Build Name + Passport details
-        # Escaped because Paragraph parses this as markup: a stray & or <
-        # in a passport number would otherwise break PDF rendering.
-        display_name = " ".join(part for part in (pax.get("title"), pax["name"]) if part)
-        name_html = escape(display_name)
-        details = []
-        if pax.get("pax_type") and pax["pax_type"] != "Adult":
-            details.append(f"Type: {pax['pax_type']}")
-        if pax["passport"]: details.append(f"Passport: {escape(pax['passport'])}")
-        if pax["dob"]: details.append(f"DOB: {escape(pax['dob'])}")
-        if pax["doe"]: details.append(f"DOE: {escape(pax['doe'])}")
-        if details:
-            name_html += "<br/><font color='#616161' size='6'>" + "<br/>".join(details) + "</font>"
-            
-        # Build Sector + Barcode array
-        sector_elements = []
-        for fl in flights:
-            sector_str = f"{fl['from_code']}-{fl['to_code']}"
-            sector_elements.append(Paragraph(sector_str, cell_style))
-            
-            if fl.get("barcode_path") and os.path.exists(fl["barcode_path"]):
-                try:
-                    img = Image(fl["barcode_path"], width=50, height=20)
-                    sector_elements.append(img)
-                except Exception as exc:
-                    log.warning("Could not embed barcode image: %s", exc)
-            sector_elements.append(Spacer(1, 6))
-
-        # Label each value by segment only when there is more than one, so a
-        # single-segment ticket does not repeat "Flight 1:" in every cell.
-        def per_segment(values, fallback, default):
-            if not values:
-                return escape(fallback or default)
-            if len(values) == 1:
-                return escape(values[0] or default)
-            return "<br/>".join(
-                f"Flight {idx + 1}: {escape(value or default)}"
-                for idx, value in enumerate(values)
-            )
-
-        seats_html = per_segment(pax.get("seats_per_segment"), pax.get("seat"), "N/A")
-        meals_html = per_segment(pax.get("meals_per_segment"), pax.get("meal"), "Not selected")
-        checkin_html = per_segment(pax.get("checkin_per_segment"), pax.get("checkin_bag"), "Airline Default")
-        hand_html = per_segment(pax.get("hand_per_segment"), pax.get("hand_bag"), "Airline Default")
-
-        row = [
-            Paragraph(str(pi + 1), cell_style),
-            Paragraph(name_html, cell_style),
-            sector_elements,
-            Paragraph(pax["ticket_no"], cell_style),
-            Paragraph(seats_html, cell_style),
-            Paragraph(meals_html, cell_style),
-            Paragraph(checkin_html, cell_style),
-            Paragraph(hand_html, cell_style),
-        ]
-        pax_table_data.append(row)
-
-    pt = Table(pax_table_data, colWidths=pax_col_w)
-    pt.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), PRIMARY),
-        ("TEXTCOLOR", (0, 0), (-1, 0), WHITE),
-        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
-        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("FONTSIZE", (0, 0), (-1, 0), 7),
-        ("BACKGROUND", (0, 1), (-1, -1), WHITE),
-        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [WHITE, HexColor("#fbfcfe")]),
-        ("BOX", (0, 0), (-1, -1), 0.6, BORDER),
-        ("INNERGRID", (0, 0), (-1, -1), 0.4, BORDER),
-        ("TOPPADDING", (0, 0), (-1, -1), 6),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
-    ]))
-
-    pw, ph = pt.wrap(usable_w, 300)
-    y -= ph
-    pt.drawOn(c, margin, y)
-
-    y -= 16
-
-    # ══════════════════════════════════════════════════════════
-    # FARE DETAILS
-    # ══════════════════════════════════════════════════════════
-    draw_section_heading("FARE DETAILS", y)
-    y -= 18
+    t.section("Passengers")
+    draw_passengers(t, passengers, flights)
 
     fare_items = [
-        ("Base Fare", base_fare),
-        ("Airline Taxes & Fees", taxes),
-        ("Insurance", insurance),
-        ("Meals", meals_fee),
-        ("Baggage", baggage_fee),
-        ("Seats", seats_fee),
-        ("Zero Cancel", zero_cancel),
-        ("Discount", -discount)
+        ("Base Fare", format_money(base_fare)),
+        ("Airline Taxes & Fees", format_money(taxes)),
+        ("Insurance", format_money(insurance)),
+        ("Meals", format_money(meals_fee)),
+        ("Baggage", format_money(baggage_fee)),
+        ("Seats", format_money(seats_fee)),
+        ("Zero Cancel", format_money(zero_cancel)),
+        ("Discount", format_money(-discount)),
     ]
-    active_fare_items = [(lbl, val) for lbl, val in fare_items if val != 0 or lbl in ["Base Fare", "Airline Taxes & Fees"]]
-    
-    fare_h = 45 + (len(active_fare_items) * 14) + (14 if gstin else 0)
-    if y - fare_h < 50:
-        c.showPage(); y = height - 50
-    y -= fare_h
-    draw_rounded_rect(margin, y, usable_w, fare_h, 10, fill_color=WHITE, stroke_color=BORDER)
+    amounts = [base_fare, taxes, insurance, meals_fee, baggage_fee, seats_fee, zero_cancel, discount]
+    fare_items = [item for item, amount in zip(fare_items, amounts)
+                  if amount or item[0] in ("Base Fare", "Airline Taxes & Fees")]
 
-    # Left side — breakdown
-    lx = margin + 15
-    current_y = y + fare_h - 18
-    for label, val in active_fare_items:
-        c.setFillColor(GRAY); c.setFont("Helvetica", 8)
-        if label == "Discount":
-            c.setFillColor(HexColor("#e53935"))
-        c.drawString(lx, current_y, label)
-        c.setFillColor(DARK); c.setFont("Helvetica-Bold", 10)
-        if label == "Discount":
-            c.setFillColor(HexColor("#e53935"))
-        c.drawString(lx + 120, current_y, format_money(val))
-        current_y -= 14
+    t.section("Fare")
+    payment_label = payment_method + (f" ending {card_last_4}" if card_last_4 else "")
+    draw_fares(t, fare_items, total_fare_str, payment=payment_label,
+               gst_company=gst_company, gstin=gstin)
 
-    # Divider
-    c.setStrokeColor(BORDER); c.setLineWidth(0.5)
-    c.line(lx, current_y + 6, lx + 200, current_y + 6)
-    
-    if gstin:
-        c.setFillColor(GRAY); c.setFont("Helvetica", 7)
-        gst_line = f"GSTIN: {gstin}" + (f"  |  {gst_company}" if gst_company else "")
-        c.drawString(lx, current_y - 20, gst_line[:70])
-        current_y -= 14
+    draw_footer(
+        t,
+        company=COMPANY,
+        issued=f"Issued {datetime.now().strftime('%d %b %Y, %H:%M')} IST"
+               f"  ·  {booking_platform}  ·  {fare_type}  ·  {refund_status}",
+        contact_line=f"{agency_email}  ·  {agency_phone}"
+                     f"  ·  Passenger contact: {customer_email} / {customer_phone}",
+        terms="Carry a valid government-issued photo ID for every passenger. Check-in usually "
+              "closes 60 minutes before departure (3 hours for international). All times are "
+              "local to each airport. Quote the airline PNR to the airline, and the Booking ID "
+              "to us.",
+    )
 
-    c.setFillColor(PRIMARY); c.setFont("Helvetica-Bold", 9)
-    c.drawString(lx, current_y - 8, "Total Amount")
-    c.setFillColor(ACCENT); c.setFont("Helvetica-Bold", 12)
-    c.drawString(lx + 120, current_y - 8, total_fare_str)
-
-    # Right side — Total highlight box
-    fare_box_w = 160
-    fare_box_h = 50
-    fare_box_x = margin + usable_w - fare_box_w - 10
-    fare_box_y = y + (fare_h - fare_box_h) / 2
-    draw_rounded_rect(fare_box_x, fare_box_y, fare_box_w, fare_box_h, 9, fill_color=PRIMARY)
-
-    c.setFillColor(HexColor("#b8c7d8")); c.setFont("Helvetica", 7)
-    c.drawCentredString(fare_box_x + fare_box_w / 2, fare_box_y + 34, "TOTAL AMOUNT")
-    c.setFillColor(WHITE); c.setFont("Helvetica-Bold", 16)
-    c.drawCentredString(fare_box_x + fare_box_w / 2, fare_box_y + 14, total_fare_str)
-
-    # Payment details
-    y -= 18
-    pm_text = f"Paid via {payment_method}"
-    if payment_method in ["Credit Card", "Debit Card"] and card_last_4:
-        pm_text += f" ending in {card_last_4}"
-    c.setFont("Helvetica-Bold", 7)
-    pill_w = c.stringWidth("PAID", "Helvetica-Bold", 7) + 18
-    pill_x = margin + usable_w - pill_w
-    draw_pill(pill_x, y + 2, "PAID", GREEN)
-    c.setFillColor(GRAY); c.setFont("Helvetica", 8)
-    c.drawRightString(pill_x - 8, y + 8, pm_text)
-
-    y -= 16
-
-    y -= 20
-    if y < 350:
-        c.showPage()
-        y = height - 50
-
-    # ══════════════════════════════════════════════════════════
-    # TERMS & CONDITIONS
-    # ══════════════════════════════════════════════════════════
-    draw_section_heading("TRAVEL CHECKLIST", y)
-    y -= 14
-    checklist_h = 48
-    y -= checklist_h
-    draw_rounded_rect(margin, y, usable_w, checklist_h, 10, fill_color=LIGHT_BG, stroke_color=BORDER)
-    c.setFillColor(PRIMARY)
-    c.setFont("Helvetica-Bold", 8.5)
-    c.drawString(margin + 14, y + 29, "Before airport arrival")
-    c.setFillColor(DARK)
-    c.setFont("Helvetica", 8)
-    c.drawString(margin + 14, y + 16, "1) Complete web check-in before arriving at the airport.")
-    c.drawString(margin + 275, y + 16, "2) Report at least 3 hours before flight departure.")
-    y -= 16
-
-    tc_data = [
-        [Paragraph("Important Terms & Conditions", ParagraphStyle("tcheader", parent=styles["Normal"], fontSize=9, textColor=WHITE, fontName="Helvetica-Bold")), ""],
-        [Paragraph("All Flight timings are shown in local timezones", cell_style), Paragraph("Change in the Name or Title of the Passenger is not allowed", cell_style)],
-        [Paragraph("Carry Photo ID / Passport for Check-in. Carry a print-out or present this email for check-in. For Infant, it is mandatory to carry the Birth Certificate", cell_style), Paragraph("Customer to report to the Airport atleast 2 hours in Domestic and 3 hours in International Flights, before departure time", cell_style)],
-        [Paragraph("Use Airline PNR while talking to Airlines<br/>Use Booking ID for all communication with Bharat Horizon Travels", cell_style), Paragraph("Check the Baggage Allowance – Cabin and Check-in – No Free Baggage Allowance for Infants. Meals, Seats, Special Requests are not guaranteed", cell_style)],
-        [Paragraph("For cancellation/date change, Airlines Fees & Bharat Horizon Travels Service Fees will apply. Incase of no-show, tickets are non-refundable", cell_style), Paragraph("For International Trips, Ensure your passport is valid for more than 6 months. Please check Transit & Destination Visa Requirement", cell_style)],
-        [Paragraph("Any Refund Claims arising due to cancellation / delay of flight by the Airline shall be subject to Bharat Horizon Travels receiving the refund from the Airline. In the Event Airline does not refund the amount to the Bharat Horizon Travels, Bharat Horizon Travels shall not be held liable for the same", cell_style), Paragraph("In case a booking confirmation e-mail and sms gets delayed or fails because of technical reasons or as a result of incorrect e-mail ID / phone number provided by the user etc, a ticket will be considered 'booked' as long as the ticket shows up on the confirmation page or in the User Login section of Bharat Horizon Travels", cell_style)],
-        [Paragraph("Post booking, you should check/update your contact details on the airlines website to make sure you get the latest update directly from airlines. In SOTO fares, post booking functions are not supported. Please contact airlines directly", cell_style), Paragraph("Convenience, Trip Care, Zero Cancel & Cash Back Sign-Up Fees are not refundable under any circumstances, once a confirmed ticket is booked/generated. If you are booking a special discounted return fare then both flights have to be cancelled together", cell_style)],
-        [Paragraph("Cancellation of Flight Ticket upto 24 hours will be dealt by Bharat Horizon Travels. Less than 24 hours, you should cancel it directly with the airlines and inform us for the refund processing", cell_style), Paragraph("GST Credit (if applicable) will be provided directly by the airlines to the traveller", cell_style)],
-    ]
-    
-    tc_table = Table(tc_data, colWidths=[usable_w/2, usable_w/2])
-    tc_table.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), PRIMARY),
-        ("SPAN", (0, 0), (-1, 0)),
-        ("TEXTCOLOR", (0, 0), (-1, 0), WHITE),
-        ("BOX", (0, 0), (-1, -1), 0.6, BORDER),
-        ("INNERGRID", (0, 0), (-1, -1), 0.4, BORDER),
-        ("BACKGROUND", (0, 1), (-1, -1), WHITE),
-        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [WHITE, HexColor("#fbfcfe")]),
-        ("VALIGN", (0, 0), (-1, -1), "TOP"),
-        ("PADDING", (0, 0), (-1, -1), 5),
-    ]))
-    tw, th = tc_table.wrap(usable_w, 800)
-    if y - th < 120:
-        c.showPage()
-        y = height - 50
-    y -= th
-    tc_table.drawOn(c, margin, y)
-
-    y -= 25
-    c.setFillColor(DARK); c.setFont("Helvetica", 8)
-    c.drawCentredString(width/2, y, "Bharat Horizon Travels is not liable for any Discrepancy / Deficiency in service by the Airline or Service Providers. Any discrepancy regarding")
-    y -= 11
-    c.drawCentredString(width/2, y, "this ticket, please inform us within 3 hrs of Issuance. After that we are not liable for any changes.")
-    y -= 13
-    c.setFillColor(ACCENT)
-    c.drawCentredString(width/2, y, "DGCA Passenger Charter – Check here")
-    
-    y -= 20
-    c.setStrokeColor(HexColor("#e0e0e0")); c.setLineWidth(0.5)
-    c.line(margin, y, margin + usable_w, y)
-    y -= 15
-    c.setFillColor(DARK); c.setFont("Helvetica-Bold", 10)
-    c.drawCentredString(width/2, y, "Bharat Horizon Travels")
-    y -= 14
-    c.setFont("Helvetica", 10)
-    c.drawCentredString(width/2, y, "Dehradun")
-    y -= 14
-    c.setFont("Helvetica-Bold", 10)
-    c.drawCentredString(width/2, y, "Have a Nice Trip")
-    y -= 10
-    c.line(margin, y, margin + usable_w, y)
-
-    # Decorative side strips
-    c.setFillColor(PRIMARY)
-    c.rect(0, 0, 8, height, fill=1, stroke=0)
-    c.setFillColor(ACCENT)
-    c.rect(width - 8, 0, 8, height, fill=1, stroke=0)
-
-    c.save()
+    t.save()
     buffer.seek(0)
     
     # ── Save Tracking to Excel ──────────────────────────────────

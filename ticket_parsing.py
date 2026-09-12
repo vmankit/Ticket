@@ -304,10 +304,12 @@ def parse_agency_ticket(text):
     return result
 
 
-def parse_own_ticket(text):
-    """Return parsed fields for one of our own tickets, or None if it isn't one."""
-    if not looks_like_own_ticket((text or "").upper()):
-        return None
+def _parse_own_legacy(text):
+    """Read the pre-redesign layout ("BOOKING SUMMARY" / "FLIGHT DETAILS").
+
+    Tickets issued before the redesign are still in circulation and get
+    re-uploaded to be reissued, so that layout has to keep working.
+    """
 
     lines = [l.strip() for l in text.splitlines() if l.strip()]
     joined = "\n".join(lines)
@@ -428,6 +430,126 @@ def parse_own_ticket(text):
             "name": name,
             "title": (match.group(2) or "").title(),
             "ticket_no": ticket_match.group(1) if ticket_match else "",
+        })
+
+    return result
+
+
+def parse_own_ticket(text):
+    """Parse a ticket this app generated, in either layout."""
+    if not looks_like_own_ticket((text or "").upper()):
+        return None
+    if re.search(r"\bITINERARY\b", text or "", re.I):
+        return _parse_own_current(text)
+    return _parse_own_legacy(text)
+
+
+def _parse_own_current(text):
+    """Return parsed fields for one of our own tickets, or None if it isn't one.
+
+    The layout is ours, so it is read from fixed anchors rather than guessed
+    at. Text extraction flattens each itinerary card into a short run of lines:
+
+        AI AIR INDIA - AI 422 ECONOMY
+        ATQ DEL
+        Amritsar New Delhi
+        1:10 PM 2:15 PM
+        Mon, 14 Sep 2026 1h 5m Mon, 14 Sep 2026
+    """
+    lines = [l.strip() for l in normalize_text(text).splitlines() if l.strip()]
+    joined = "\n".join(lines)
+
+    result = {
+        "booking_platform": "", "pnr": "", "booking_id": "", "booking_date": "",
+        "customer_email": "", "customer_phone": "", "base_fare": "", "taxes_fees": "",
+        "total_fare": "", "flights": [], "passengers": [],
+    }
+
+    # ── Header: "... PNR" then "AT 8B6E58" on the line below ─────────────
+    for idx, line in enumerate(lines[:6]):
+        if line.upper().rstrip().endswith("PNR") and idx + 1 < len(lines):
+            tokens = re.findall(r"\b([A-Z0-9]{4,10})\b", lines[idx + 1].upper())
+            if tokens:
+                result["pnr"] = tokens[-1]
+            break
+
+    booking = re.search(r"Booking\s+([A-Za-z0-9][A-Za-z0-9\-]{3,})", joined)
+    if booking:
+        result["booking_id"] = booking.group(1)
+
+    issued = re.search(r"Issued\s+([0-9]{1,2}\s+[A-Za-z]{3}\s+[0-9]{4})", joined)
+    if issued:
+        result["booking_date"] = _find_date(issued.group(1))
+
+    emails = re.findall(r"[\w.%+-]+@[\w.-]+\.[A-Za-z]{2,}", joined)
+    if emails:
+        result["customer_email"] = emails[-1]
+    contact = re.search(r"Passenger contact:\s*\S+\s*/\s*(\+?[\d\s-]{10,})", joined)
+    if contact:
+        result["customer_phone"] = contact.group(1).strip()
+
+    for key, pattern in (
+        ("base_fare", r"Base Fare\s+" + MONEY_RE),
+        ("taxes_fees", r"Airline Taxes(?:\s*&\s*Fees)?\s+" + MONEY_RE),
+        ("total_fare", r"Total Amount\s+" + MONEY_RE),
+    ):
+        match = re.search(pattern, joined, re.I)
+        if match:
+            result[key] = match.group(1).replace(",", "")
+
+    # ── Itinerary cards ──────────────────────────────────────────────────
+    header_re = re.compile(
+        r"^([A-Z0-9]{2})\s+(.+?)\s+·\s+([A-Z0-9]{2}\s?\d{2,4})\b", re.I)
+    route_re = re.compile(r"^([A-Z]{3})\s+([A-Z]{3})$")
+    times_re = re.compile(r"^(\d{1,2}:[0-5]\d\s*[AP]M)\s+(\d{1,2}:[0-5]\d\s*[AP]M)$", re.I)
+
+    itinerary = _section(lines, "ITINERARY", "PASSENGERS", "FARE")
+    for idx, line in enumerate(itinerary):
+        header = header_re.match(line)
+        if not header:
+            continue
+        segment = {
+            "flight_no": re.sub(r"\s+", " ", header.group(3)).upper(),
+            "airline": header.group(2).title(),
+        }
+        for candidate in itinerary[idx + 1:idx + 6]:
+            if header_re.match(candidate):
+                break
+            route = route_re.match(candidate.upper())
+            if route and "from_code" not in segment:
+                segment["from_code"], segment["to_code"] = route.group(1), route.group(2)
+                continue
+            times = times_re.match(candidate)
+            if times and "dep_time_raw" not in segment:
+                segment["dep_time_raw"] = _to_24h(*re.match(
+                    r"(\d{1,2}):([0-5]\d)\s*([AP]M)", times.group(1), re.I).groups())
+                segment["arr_time_raw"] = _to_24h(*re.match(
+                    r"(\d{1,2}):([0-5]\d)\s*([AP]M)", times.group(2), re.I).groups())
+                continue
+            if "date" not in segment:
+                found = _find_date(candidate)
+                if found:
+                    segment["date"] = found
+        if segment.get("from_code"):
+            result["flights"].append(segment)
+
+    # ── Passenger rows ───────────────────────────────────────────────────
+    pax_lines = _section(lines, "PASSENGERS", "FARE", "Issued")
+    pax_re = re.compile(
+        r"^(\d{1,2})\.\s+(?:(Mr|Mrs|Ms|Mstr|Dr|Miss)\.?\s+)?"
+        r"([A-Za-z][A-Za-z .'\-]{2,40}?)\s+(?=[A-Z]{3}-[A-Z]{3}\b|\d{3}-\d)", re.I)
+    for line in pax_lines:
+        match = pax_re.match(line)
+        if not match:
+            continue
+        name = re.sub(r"\s{2,}", " ", match.group(3)).strip().title()
+        if len(name.split()) < 2:
+            continue
+        ticket = re.search(r"\b(\d{3}-\d{6,})\b", line)
+        result["passengers"].append({
+            "name": name,
+            "title": (match.group(2) or "").title(),
+            "ticket_no": ticket.group(1) if ticket else "",
         })
 
     return result

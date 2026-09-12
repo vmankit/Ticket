@@ -1297,7 +1297,7 @@ def generate_ticket():
     # after the fact and has to carry the time it was actually issued.
     issued_at = parse_datetime_local(request.form.get("issued_at")) or datetime.now()
 
-    # Free text printed under the amount. Replaces the automatic "Paid via X"
+    # Free text printed under the amount. Replaces the automatic payment
     # line, so whatever goes there is chosen rather than assumed.
     remarks = " ".join(request.form.get("remarks", "").split())[:200]
 

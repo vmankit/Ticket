@@ -102,12 +102,6 @@ def validate_booking(form):
     if booking_date and _parse_date(booking_date) is None:
         errors.append("Booking Date must be a valid date.")
 
-    payment_method = (form.get("payment_method") or "").strip()
-    card_last_4 = (form.get("card_last_4") or "").strip()
-    if payment_method in ("Credit Card", "Debit Card") and card_last_4:
-        if not re.fullmatch(r"\d{4}", card_last_4):
-            errors.append("Card Last 4 Digits must be exactly 4 digits.")
-
     return errors
 
 

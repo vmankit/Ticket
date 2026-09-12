@@ -10,6 +10,8 @@
         *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
         :root{--primary:#0f2742;--primary-light:#1f456a;--primary-dark:#081727;--accent:#0e9488;--accent-soft:#e7f7f5;--surface:#fff;--surface-alt:#f6f8fb;--bg:#eef2f6;--text:#162033;--text-muted:#667085;--border:#d9e0ea;--success:#14845f;--danger:#c24135;--gold:#b7791f;--shadow:0 14px 40px rgba(15,39,66,.08);--shadow-lg:0 24px 70px rgba(15,39,66,.12)}
         html{scroll-behavior:smooth}
+        :root{accent-color:#0e9488}
+        :where(input,select,textarea,button,summary):focus-visible{outline:2px solid var(--accent);outline-offset:2px}
         body{font-family:'Inter',-apple-system,sans-serif;background:linear-gradient(180deg,#f7f9fc 0%,var(--bg) 100%);color:var(--text);min-height:100vh;line-height:1.6}
         body::before{content:'';position:fixed;inset:0;background:linear-gradient(90deg,rgba(15,39,66,.05) 1px,transparent 1px),linear-gradient(180deg,rgba(15,39,66,.04) 1px,transparent 1px);background-size:44px 44px;mask-image:linear-gradient(180deg,rgba(0,0,0,.65),transparent 70%);pointer-events:none;z-index:0}
 
@@ -22,7 +24,7 @@
         .header p{color:rgba(255,255,255,.72);font-size:.85rem;margin-top:1px;letter-spacing:.2px;position:relative;z-index:1}
         .header .db-badge{display:inline-flex;align-items:center;background:rgba(255,255,255,.08);color:rgba(255,255,255,.86);padding:7px 12px;border-radius:999px;font-size:.72rem;font-weight:600;border:1px solid rgba(255,255,255,.12);position:relative;z-index:1;white-space:nowrap}
 
-        .container{max-width:1080px;margin:28px auto 40px;padding:0 24px;position:relative;z-index:1}
+        .container{max-width:1080px;margin:28px auto 40px;padding:0 24px 96px;position:relative;z-index:1}
         .card{background:rgba(255,255,255,.96);border-radius:10px;box-shadow:var(--shadow);overflow:hidden;border:1px solid rgba(217,224,234,.9);margin-bottom:18px;backdrop-filter:blur(12px)}
         .card-header{background:#fff;padding:17px 22px;display:flex;align-items:center;gap:12px;border-bottom:1px solid var(--border)}
         .card-header h2{color:var(--primary);font-size:.98rem;font-weight:750;letter-spacing:.2px}
@@ -62,12 +64,28 @@
         .optional-tag{margin-left:auto;background:var(--surface-alt);border:1px solid var(--border);
             color:var(--text-muted);font-size:.6rem;font-weight:700;letter-spacing:.6px;
             padding:2px 8px;border-radius:999px;text-transform:none}
+        .toggle-row{grid-column:1/-1;display:flex;align-items:flex-start;gap:11px;cursor:pointer;
+            padding:12px 14px;border:1px solid var(--border);border-radius:9px;background:var(--surface-alt)}
+        .toggle-row:hover{border-color:var(--accent);background:var(--accent-soft)}
+        .toggle-row input{width:auto;height:17px;margin-top:2px;flex:none}
+        .toggle-row strong{display:block;font-size:.78rem;font-weight:700;color:var(--text)}
+        .toggle-row em{display:block;font-style:normal;font-size:.71rem;color:var(--text-muted);margin-top:2px}
         .form-group select{appearance:none;background-image:url("data:image/svg+xml;charset=UTF-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%23667085' d='M1 1l5 5 5-5'/%3E%3C/svg%3E");
             background-repeat:no-repeat;background-position:right 12px center;padding-right:32px;cursor:pointer}
-        .form-group input:invalid:not(:placeholder-shown){border-color:var(--danger)}
+        /* Only flag a field once the user has actually engaged with it.
+           :user-invalid stays quiet on an untouched form; the placeholder-shown
+           rule is the fallback for browsers without it, and it deliberately
+           skips date/time inputs, which never report a shown placeholder and
+           so would sit red from first paint. */
+        .form-group input:not([type=date]):not([type=time]):not([type=datetime-local]):invalid:not(:placeholder-shown){border-color:var(--danger)}
+        @supports selector(:user-invalid){
+            .form-group input:invalid:not(:placeholder-shown){border-color:var(--border)}
+            .form-group input:user-invalid{border-color:var(--danger);background:#fdf5f4}
+        }
 
         /* Flight segment */
         .flight-segment{border:1px solid var(--border);border-radius:10px;padding:20px;margin-bottom:16px;position:relative;background:var(--surface-alt);transition:box-shadow .2s,border-color .2s}
+        .flight-segment:focus-within{border-color:var(--accent);background:var(--surface);box-shadow:0 10px 28px rgba(14,148,136,.12)}
         .flight-segment:hover{box-shadow:0 8px 24px rgba(15,39,66,.07);border-color:#c6d0dc}
         .flight-segment .seg-label{position:absolute;top:-10px;left:16px;background:var(--primary);color:#fff;font-size:.64rem;font-weight:800;padding:3px 10px;border-radius:999px;letter-spacing:.9px}
         .flight-segment .remove-flight{position:absolute;top:8px;right:8px;background:none;border:none;color:var(--danger);cursor:pointer;font-size:1.1rem;padding:4px 8px;border-radius:6px;transition:background .2s}
@@ -132,7 +150,7 @@
            generate buttons stay reachable instead of living at the bottom. */
         .action-bar{position:sticky;bottom:12px;z-index:90;margin-top:22px;
             padding:12px 18px;border-radius:12px;
-            background:rgba(255,255,255,.94);backdrop-filter:blur(14px);
+            background:var(--surface);
             border:1px solid var(--border);box-shadow:0 14px 40px rgba(15,39,66,.16)}
         .action-bar-inner{max-width:1080px;margin:0 auto;display:flex;align-items:center;
             justify-content:space-between;gap:16px;flex-wrap:wrap}
@@ -249,10 +267,6 @@
                                    placeholder="Fetching..." style="text-transform:uppercase">
                             <div class="helper">Our own reference. Generated for you.</div>
                         </div>
-                        <div class="form-group" style="display: flex; align-items: center; gap: 10px; margin-top: 25px;">
-                            <input type="checkbox" name="is_dummy" id="is_dummy" value="true" style="width: auto; height: 18px;">
-                            <label for="is_dummy" style="margin: 0; cursor: pointer;">Dummy Ticket (Do not save to Excel)</label>
-                        </div>
                         <div class="form-group">
                             <label>Booking Date</label>
                             <input type="date" name="booking_date" id="booking_date">
@@ -298,6 +312,13 @@
                             </select>
                             <div class="helper">Shown as the status badge on the ticket.</div>
                         </div>
+                        <label class="toggle-row" for="is_dummy">
+                            <input type="checkbox" name="is_dummy" id="is_dummy" value="true">
+                            <span>
+                                <strong>Dummy ticket</strong>
+                                <em>Generates the PDF but keeps it out of the Excel tracker.</em>
+                            </span>
+                        </label>
                     </div>
 
                     <div class="separator"></div>
@@ -427,26 +448,6 @@
                         </div>
                     </div>
                     
-                    <div class="separator"></div>
-                    <div class="section-title"><span class="dot"></span>PAYMENT METHOD</div>
-                    <div class="form-grid three-col">
-                        <div class="form-group">
-                            <label>Paid Via</label>
-                            <select name="payment_method" id="paymentMethod" onchange="toggleCard()">
-                                <option value="UPI">UPI</option>
-                                <option value="Credit Card">Credit Card</option>
-                                <option value="Debit Card">Debit Card</option>
-                                <option value="Net Banking">Net Banking</option>
-                                <option value="Wallet">Wallet</option>
-                                <option value="Cash">Cash</option>
-                            </select>
-                        </div>
-                        <div class="form-group" id="cardLast4Group" style="display:none;">
-                            <label>Card Last 4 Digits</label>
-                            <input type="text" name="card_last_4" placeholder="e.g. 1234" maxlength="4">
-                        </div>
-                    </div>
-
                 </div>
             </div>
             </div>
@@ -506,17 +507,6 @@ function calcTotal(){
     helper.textContent=tooLarge?'Discount exceeds the rest of the fare.':'';
     helper.style.color=tooLarge?'var(--danger)':'';
     document.getElementById('fareTotalDisplay').classList.toggle('over', tooLarge);
-}
-
-function toggleCard() {
-    const pm = document.getElementById('paymentMethod').value;
-    const group = document.getElementById('cardLast4Group');
-    if(pm === 'Credit Card' || pm === 'Debit Card') {
-        group.style.display = 'block';
-    } else {
-        group.style.display = 'none';
-        group.querySelector('input').value = '';
-    }
 }
 
 // ─── Time helpers ─────────────────────────────────────────

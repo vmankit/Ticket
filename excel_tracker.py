@@ -107,6 +107,21 @@ def get_next_booking_id(platform_code="AT"):
 
     return f"{platform_code}-{today}-{sequence:04d}"
 
+def _drop_retired_columns(ws):
+    """Remove columns the app no longer records, keeping older rows aligned.
+
+    Payment mode used to be tracked per booking. It is gone from the form, so
+    an existing tracker still carrying the column would push every new row one
+    cell to the left. Dropping it once keeps old and new rows in the same
+    shape; the values it held are still in the file's git history.
+    """
+    retired = {"Payment Mode"}
+    headers = [cell.value for cell in ws[1]] if ws.max_row else []
+    for idx in range(len(headers), 0, -1):
+        if headers[idx - 1] in retired:
+            ws.delete_cols(idx)
+
+
 def save_to_excel(data):
     """Saves ticket data to the excel tracker with proper file locking."""
     # Retry logic for file locking
@@ -148,13 +163,14 @@ def save_to_excel(data):
                         headers = [
                             "S.No.", "Generated On", "Booking Platform", "PNR", "Booking ID", 
                             "Lead Passenger", "Total Pax", "Customer Phone", "Route", "Travel Date", 
-                            "Departure Time", "Flight No(s)", "Total Amount", "Payment Mode", 
+                            "Departure Time", "Flight No(s)", "Total Amount", 
                             "Fare Type", "Refund Status", "Flight Status", "Notes"
                         ]
                         ws.append(headers)
                     else:
                         wb = load_workbook(EXCEL_FILE)
                         ws = wb.active
+                        _drop_retired_columns(ws)
 
                     # S.No. is the current row count (excluding header)
                     sno = max(1, ws.max_row)
@@ -194,13 +210,14 @@ def save_to_excel(data):
                         headers = [
                             "S.No.", "Generated On", "Booking Platform", "PNR", "Booking ID", 
                             "Lead Passenger", "Total Pax", "Customer Phone", "Route", "Travel Date", 
-                            "Departure Time", "Flight No(s)", "Total Amount", "Payment Mode", 
+                            "Departure Time", "Flight No(s)", "Total Amount", 
                             "Fare Type", "Refund Status", "Flight Status", "Notes"
                         ]
                         ws.append(headers)
                     else:
                         wb = load_workbook(EXCEL_FILE)
                         ws = wb.active
+                        _drop_retired_columns(ws)
 
                     sno = max(1, ws.max_row)
                     data_to_insert = [sno] + data

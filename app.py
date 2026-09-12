@@ -1272,8 +1272,6 @@ def generate_ticket():
     
     refund_status = request.form.get("refund_status", "Refundable")
     fare_type = request.form.get("fare_type", "REGULAR")
-    payment_method = request.form.get("payment_method", "UPI")
-    card_last_4 = request.form.get("card_last_4", "")
     booking_platform = request.form.get("booking_platform", "Direct")
     is_dummy = request.form.get("is_dummy") == "true"
 
@@ -1590,7 +1588,6 @@ def generate_ticket():
         dep_time_val,
         flight_nos,
         total_fare,
-        payment_method,
         fare_type,
         refund_status,
         ticket_status,

@@ -257,7 +257,8 @@ def draw_flight(t, flight, index, total):
 
     # Perforation between header and body
     divider = top - head_h
-    t.rule(MARGIN + 14, divider, CONTENT_W - 28, dash=(2, 3), color=LINE)
+    t.rule(MARGIN + 14, divider, CONTENT_W - 28, dash=(2.5, 3),
+           color=HexColor("#CBD0D8"), line_width=0.9)
     for cx in (MARGIN, PAGE_W - MARGIN):
         t.c.saveState()
         t.c.setFillColor(white)
@@ -288,11 +289,13 @@ def draw_flight(t, flight, index, total):
     t.text(right_x, divider - DATE_DY, flight.get("date", ""), size=7.6, color=FAINT, align="right")
 
     # Flight path
-    mid_left = left_x + 100
-    mid_right = right_x - 100
+    gap_left = left_x + 100
+    gap_right = right_x - 100
     path_y = time_y + 4
-    if mid_right > mid_left + 40:
-        _flight_path(t, mid_left, mid_right, path_y, flight.get("duration"))
+    if gap_right > gap_left + 40:
+        centre = (gap_left + gap_right) / 2
+        half = min((gap_right - gap_left) / 2, 66)
+        _flight_path(t, centre - half, centre + half, path_y, flight.get("duration"))
 
     if has_baggage:
         baggage_y = divider - DATE_DY - 25

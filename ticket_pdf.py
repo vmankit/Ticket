@@ -50,6 +50,8 @@ DATE_BASE_MM = 44.1
 PATH_Y_MM = 35.9
 PLANE_Y_MM = 29.5
 ARC_LIFT_MM = 3.53
+TERMINAL_TOP_MM = 47.0
+TERMINAL_H_MM = 5.5
 BAGGAGE_BASE_MM = 61.3
 CARD_H_BAGGAGE_MM = 66.4
 CARD_H_PLAIN_MM = 49.6
@@ -304,7 +306,17 @@ def draw_flight(t, flight, index, total):
     so the card is a fixed shape rather than a box grown around its padding.
     """
     has_baggage = bool(_fmt(flight.get("checkin_bag"), "") or _fmt(flight.get("hand_bag"), ""))
-    card_h = (CARD_H_BAGGAGE_MM if has_baggage else CARD_H_PLAIN_MM) * MM
+    has_terminal = bool((flight.get("from_terminal") or "").strip()
+                        or (flight.get("to_terminal") or "").strip())
+    if has_baggage:
+        card_mm = CARD_H_BAGGAGE_MM
+    elif has_terminal:
+        # The short card stops above the terminal pills, so it is taken down
+        # to clear them.
+        card_mm = TERMINAL_TOP_MM + TERMINAL_H_MM + 5.0
+    else:
+        card_mm = CARD_H_PLAIN_MM
+    card_h = card_mm * MM
 
     t.space(card_h + 8 * MM)
     if index == 0:
@@ -379,6 +391,21 @@ def draw_flight(t, flight, index, total):
     _flight_path(t, PAGE_W / 2 - 21.9 * MM, PAGE_W / 2 + 21.9 * MM,
                  below(PATH_Y_MM), ARC_LIFT_MM * MM, below(PLANE_Y_MM),
                  flight.get("duration"))
+
+    # Terminal pills sit under each side's date, where the reference puts them.
+    for terminal, x_edge, align in (
+        (flight.get("from_terminal"), left_x, "left"),
+        (flight.get("to_terminal"), right_x, "right"),
+    ):
+        terminal = (terminal or "").strip()
+        if not terminal:
+            continue
+        label = terminal if terminal.upper().startswith("TERMINAL") else f"Terminal {terminal}"
+        pad = 3.0 * MM
+        width = t.c.stringWidth(label, "Helvetica-Bold", 8) + 2 * pad
+        x = x_edge - width if align == "right" else x_edge
+        t.pill(x, below(TERMINAL_TOP_MM + TERMINAL_H_MM), label, fill=WASH, color=INK,
+               size=8, pad=pad, height=TERMINAL_H_MM * MM)
 
     if has_baggage:
         baggage_base = below(BAGGAGE_BASE_MM)

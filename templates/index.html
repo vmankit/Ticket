@@ -700,6 +700,14 @@ function addFlight(){
                 <label>Barcode Image</label>
                 <input type="file" name="flight_${i}_barcode" accept="image/*" style="padding: 6px 10px; font-size: 0.7rem;">
             </div>
+            <div class="form-group">
+                <label>Departure Terminal</label>
+                <input type="text" name="flight_${i}_from_terminal" maxlength="12" placeholder="e.g. T3">
+            </div>
+            <div class="form-group">
+                <label>Arrival Terminal</label>
+                <input type="text" name="flight_${i}_to_terminal" maxlength="12" placeholder="e.g. T2">
+            </div>
         </div>
 
         <!-- Baggage is part of the fare, so it belongs to the flight. Seat and

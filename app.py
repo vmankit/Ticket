@@ -1352,6 +1352,9 @@ def generate_ticket():
         meal = request.form.get(f"{prefix}meal", "Not selected")
         checkin_bag = request.form.get(f"{prefix}checkin_bag", "")
         hand_bag = request.form.get(f"{prefix}hand_bag", "")
+        # Shown as a pill under each side's date, as on a printed boarding pass.
+        from_terminal = " ".join(request.form.get(f"{prefix}from_terminal", "").split())[:12]
+        to_terminal = " ".join(request.form.get(f"{prefix}to_terminal", "").split())[:12]
 
         try:
             dep_dt = datetime.strptime(dep_time_raw, "%H:%M")
@@ -1396,6 +1399,8 @@ def generate_ticket():
             "meal": meal,
             "checkin_bag": checkin_bag,
             "hand_bag": hand_bag,
+            "from_terminal": from_terminal,
+            "to_terminal": to_terminal,
             "barcode_path": temp_barcode_path,
             "checkin_closing": checkin_closing,
             "manual_layover": manual_layover,

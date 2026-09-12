@@ -320,7 +320,12 @@ def draw_layover(t, label):
 
 
 def draw_passengers(t, passengers, flights):
-    """Passenger table, with a scannable barcode per traveller."""
+    """Passenger table, with a scannable barcode per traveller.
+
+    Laid out inside one rounded card, matching the itinerary above it: the
+    rows are measured before anything is drawn, because the card border has
+    to be stroked before the content that decides its height.
+    """
     multi = len(flights) > 1
     pad = 14
     table_w = CONTENT_W - pad * 2
@@ -338,35 +343,19 @@ def draw_passengers(t, passengers, flights):
         cursor += table_w * ratio
     barcode_right = MARGIN + pad + table_w
     barcode_width = table_w * columns[-1][1] - 6
+    header_h = 24
 
-    t.space(60)
-    header_y = t.y - 16
-    t.c.saveState()
-    t.c.setFillColor(WASH)
-    t.c.rect(MARGIN, header_y - 4, CONTENT_W, 22, stroke=0, fill=1)
-    t.c.restoreState()
-    for index, ((label, ratio), x) in enumerate(zip(columns, xs)):
-        if index == len(columns) - 1:  # right-aligned, kept inside the table
-            width = t.c.stringWidth(label, "Helvetica-Bold", 6.8) + len(label) * 1.2
-            t.tracked(barcode_right - width, header_y + 2, label, size=6.8, tracking=1.2)
-        else:
-            t.tracked(x, header_y + 2, label, size=6.8, tracking=1.2)
-    t.y = header_y - 8
-
-    def cell(x, top_y, width, html, bold=False, color=MUTED, size=7.8):
-        """Wrap inside the column; multi-segment values overflow otherwise."""
-        style = ParagraphStyle(
+    def cell_style(bold, size, color=MUTED):
+        return ParagraphStyle(
             "cell", fontName="Helvetica-Bold" if bold else "Helvetica",
             fontSize=size, leading=size + 2.6, textColor=color)
-        para = Paragraph(html, style)
-        _, height = para.wrap(width - 8, 200)
-        para.drawOn(t.c, x, top_y - height)
-        return height
 
+    # Measure first: row heights decide how tall the card has to be.
+    rows = []
     for index, pax in enumerate(passengers):
         name = " ".join(part for part in (pax.get("title"), pax.get("name")) if part)
         sectors = "<br/>".join(f"{f.get('from_code')}-{f.get('to_code')}" for f in flights) \
-            if multi else f"{flights[0].get('from_code')}-{flights[0].get('to_code')}" if flights else "—"
+            if multi else f"{flights[0].get('from_code')}-{flights[0].get('to_code')}" if flights else "\u2014"
         seats = pax.get("seats_per_segment") or []
         meals = pax.get("meals_per_segment") or []
         seat_text = "<br/>".join(_fmt(s) for s in seats) if seats else _fmt(pax.get("seat"))
@@ -375,44 +364,63 @@ def draw_passengers(t, passengers, flights):
         cells = [
             (xs[0], columns[0][1], f"{index + 1}.&nbsp;&nbsp;{escape(name)}", True, INK, 8.8),
             (xs[1], columns[1][1], sectors, False, MUTED, 7.8),
-            (xs[2], columns[2][1], escape(pax.get("ticket_no") or "—"), False, MUTED, 7.8),
+            (xs[2], columns[2][1], escape(pax.get("ticket_no") or "\u2014"), False, MUTED, 7.8),
             (xs[3], columns[3][1], seat_text, False, MUTED, 7.8),
             (xs[4], columns[4][1], meal_text, False, MUTED, 7.8),
         ]
-        heights = []
+        tallest = 0
         for x, ratio, html, bold, color, size in cells:
-            style = ParagraphStyle("m", fontName="Helvetica-Bold" if bold else "Helvetica",
-                                   fontSize=size, leading=size + 2.6)
-            _, h = Paragraph(html, style).wrap(table_w * ratio - 8, 200)
-            heights.append(h)
-        row_h = max(max(heights) + 12, 22)
+            _, h = Paragraph(html, cell_style(bold, size)).wrap(table_w * ratio - 8, 200)
+            tallest = max(tallest, h)
+        payload = re.sub(r"[^A-Za-z0-9\-]", "",
+                         pax.get("ticket_no") or pax.get("name") or "TICKET")[:18]
+        rows.append((cells, max(tallest + 16, 30), payload))
 
-        t.space(row_h + 10)
-        top_y = t.y - 6
-        for (x, ratio, html, bold, color, size) in cells:
-            cell(x, top_y, table_w * ratio, html, bold=bold, color=color, size=size)
+    card_h = header_h + sum(row_h for _, row_h, _ in rows)
+    t.space(card_h + 16)
+    top = t.y
+    bottom = top - card_h
+
+    t.rounded(MARGIN, bottom, CONTENT_W, card_h, 10, fill=white, stroke=LINE)
+    t.c.saveState()
+    t.c.setFillColor(WASH)
+    t.c.roundRect(MARGIN, top - header_h, CONTENT_W, header_h, 10, stroke=0, fill=1)
+    t.c.rect(MARGIN, top - header_h, CONTENT_W, header_h / 2, stroke=0, fill=1)
+    t.c.restoreState()
+
+    label_y = top - header_h + 9
+    for index, ((label, ratio), x) in enumerate(zip(columns, xs)):
+        if index == len(columns) - 1:  # right-aligned, kept inside the table
+            width = t.c.stringWidth(label, "Helvetica-Bold", 6.8) + len(label) * 1.2
+            t.tracked(barcode_right - width, label_y, label, size=6.8, tracking=1.2)
+        else:
+            t.tracked(x, label_y, label, size=6.8, tracking=1.2)
+
+    y = top - header_h
+    for row_index, (cells, row_h, payload) in enumerate(rows):
+        if row_index:
+            t.rule(MARGIN + pad, y, table_w)
+        for x, ratio, html, bold, color, size in cells:
+            para = Paragraph(html, cell_style(bold, size, color))
+            _, height = para.wrap(table_w * ratio - 8, 200)
+            para.drawOn(t.c, x, y - 8 - height)
 
         # Scale the bars to the column so the code cannot run over the meal
-        # text to its left.
-        payload = re.sub(r"[^A-Za-z0-9\-]", "", pax.get("ticket_no") or pax.get("name") or "TICKET")[:18]
+        # text to its left, and centre them in the row.
         try:
-            bar_h = 15
+            bar_h = min(row_h - 12, 20)
             bar_width = 0.5
             barcode = Code128(payload, barHeight=bar_h, barWidth=bar_width, humanReadable=False)
             if barcode.width > barcode_width:
                 bar_width *= barcode_width / barcode.width
                 barcode = Code128(payload, barHeight=bar_h, barWidth=bar_width, humanReadable=False)
-            # Centred in the row; it previously sat on the bottom edge and
-            # drifted further down as the other cells grew taller.
-            barcode.drawOn(t.c, barcode_right - barcode.width,
-                           top_y - (row_h + bar_h) / 2 + 4)
+            barcode.drawOn(t.c, barcode_right - barcode.width, y - (row_h + bar_h) / 2)
         except Exception:
             pass
 
-        t.y -= row_h
-        t.rule(MARGIN, t.y + 4, CONTENT_W)
+        y -= row_h
 
-    t.y -= 12
+    t.y = bottom - 14
 
 
 def draw_fares(t, total_str, *, remarks, gst_company, gstin):
@@ -423,8 +431,7 @@ def draw_fares(t, total_str, *, remarks, gst_company, gstin):
     left = MARGIN + 14
     right = PAGE_W - MARGIN - 14
 
-    t.rule(MARGIN, t.y + 4, CONTENT_W)
-    t.y -= 22
+    t.y -= 16
 
     label = "Amount Paid"
     value_w = t.c.stringWidth(total_str, "Helvetica-Bold", 17)

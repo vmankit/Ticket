@@ -9,8 +9,6 @@ import io
 import re
 from html import escape
 
-from reportlab.graphics.barcode import createBarcodeDrawing
-from reportlab.graphics import renderPDF
 from reportlab.lib.colors import HexColor, white
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
@@ -72,12 +70,12 @@ PAX_ROW_DY_MM = 7.9         # row baseline, below the row top
 PAX_CELL_INSET_MM = 4.2
 # Column bands as a fraction of the table width, from the reference.
 PAX_COLUMNS = (
-    ("PASSENGER", 0.2578),
-    ("SECTOR", 0.1220),
-    ("PNR", 0.1800),
-    ("SEAT", 0.0850),
-    ("MEAL", 0.0900),
-    ("BARCODE", 0.2652),
+    ("PASSENGER", 0.3000),
+    ("SECTOR", 0.1400),
+    ("PNR", 0.1200),
+    ("SEAT", 0.0900),
+    ("MEAL", 0.1000),
+    ("BARCODE", 0.2500),
 )
 
 # Amount, divider, footer
@@ -483,6 +481,14 @@ def draw_passengers(t, passengers, flights):
     a wrapped name, or one sector per line on a multi-leg trip - which grows
     that row rather than overflowing it.
     """
+    for flight in flights:
+        if "_barcode_image" not in flight:
+            path = flight.get("barcode_path")
+            try:
+                flight["_barcode_image"] = ImageReader(path) if path else None
+            except Exception:
+                flight["_barcode_image"] = None
+
     multi = len(flights) > 1
     table_w = CONTENT_W
     xs, cursor = [], MARGIN
@@ -520,10 +526,12 @@ def draw_passengers(t, passengers, flights):
         for x, width, html, bold, color, size in cells:
             _, h = Paragraph(html, cell_style(bold, size)).wrap(width - PAX_CELL_INSET_MM * MM, 200)
             tallest = max(tallest, h)
-        payload = re.sub(r"[^A-Za-z0-9\-]", "",
-                         f"{pax.get('pnr') or 'TICKET'}-{index + 1}")[:18]
+        # One barcode per booking: the agent uploads it against a flight, and
+        # every passenger on that flight shows it.
+        barcode_image = next((f["_barcode_image"] for f in flights
+                              if f.get("_barcode_image")), None)
         # The measured row fits one line; anything taller sets its own height.
-        rows.append((cells, max(PAX_ROW_H_MM * MM, tallest + 2 * (PAX_ROW_DY_MM - 2.9) * MM), payload))
+        rows.append((cells, max(PAX_ROW_H_MM * MM, tallest + 2 * (PAX_ROW_DY_MM - 2.9) * MM), barcode_image))
 
     def draw_chunk(chunk, top):
         """One card holding as many rows as fit, header repeated on each."""
@@ -548,7 +556,7 @@ def draw_passengers(t, passengers, flights):
                 t.tracked(x, label_y, label, size=7.6, tracking=0.8)
 
         y = top - head_h
-        for row_index, (cells, row_h, payload) in enumerate(chunk):
+        for row_index, (cells, row_h, barcode_image) in enumerate(chunk):
             if row_index:
                 t.rule(MARGIN, y, CONTENT_W)
             base = y - PAX_ROW_DY_MM * MM
@@ -557,21 +565,20 @@ def draw_passengers(t, passengers, flights):
                 _, height = para.wrap(width - PAX_CELL_INSET_MM * MM, 200)
                 para.drawOn(t.c, x, base + size * 0.72 + 0.7 * MM - height)
 
-            # A dense square 2D code, as a gate scanner would read - the old
-            # Code128 stripes were the most screen-like thing on the page.
-            side = min(row_h - 2 * MM, barcode_width, 11 * MM)
-            try:
-                code = createBarcodeDrawing("ECC200DataMatrix", value=payload)
-                # Scale on the canvas rather than on the drawing: a Drawing's
-                # own width/height and its transform are set independently, and
-                # setting both leaves the symbol at whichever was applied last.
-                t.c.saveState()
-                t.c.translate(barcode_right - side, y - (row_h + side) / 2)
-                t.c.scale(side / code.width, side / code.height)
-                renderPDF.draw(code, t.c, 0, 0)
-                t.c.restoreState()
-            except Exception:
-                pass
+            # Only ever the image the agent uploaded. A code this app invents
+            # scans to nothing at a gate, so an empty column is the honest
+            # result when no barcode was supplied.
+            if barcode_image:
+                try:
+                    box_h = row_h - 2 * MM
+                    width, height = barcode_image.getSize()
+                    draw_h = min(box_h, barcode_width * height / width)
+                    draw_w = draw_h * width / height
+                    t.c.drawImage(barcode_image, barcode_right - draw_w,
+                                  y - (row_h + draw_h) / 2, draw_w, draw_h,
+                                  preserveAspectRatio=True, mask="auto")
+                except Exception:
+                    pass
 
             y -= row_h
         return bottom

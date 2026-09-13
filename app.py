@@ -1287,6 +1287,7 @@ def generate_ticket():
     is_dummy = request.form.get("is_dummy") == "true"
     # Kept out of the printed ticket, not out of the tracker.
     hide_fare = request.form.get("hide_fare") == "true"
+    hide_agency = request.form.get("hide_agency") == "true"
 
     ticket_status = request.form.get("ticket_status", "Confirmed").strip() or "Confirmed"
     if ticket_status not in TICKET_STATUSES:
@@ -1547,7 +1548,8 @@ def generate_ticket():
     buffer = io.BytesIO()
     t = TicketCanvas(buffer)
 
-    draw_header(t, company=COMPANY, pnr=pnr, booking_id=booking_id, status=ticket_status)
+    draw_header(t, company=COMPANY, pnr=pnr, booking_id=booking_id, status=ticket_status,
+                show_agency=not hide_agency)
 
     t.section("Itinerary", at=ITINERARY_BASE_MM)
     for index, flight in enumerate(flights):
@@ -1564,6 +1566,7 @@ def generate_ticket():
     draw_footer(
         t,
         company=COMPANY,
+        show_agency=not hide_agency,
         issued=f"Issued {issued_at.strftime('%d %b %Y, %H:%M')} IST"
                f"  ·  {fare_type}  ·  {refund_status}",
         contact_line=f"{agency_email}  ·  {agency_phone}",

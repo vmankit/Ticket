@@ -242,30 +242,41 @@ def _fmt(value, fallback="—"):
     return value if value and value.lower() not in ("not selected", "n/a") else fallback
 
 
-def draw_header(t, *, company, pnr, booking_id, status):
-    """Wordmark and booking reference on the left, PNR set large on the right."""
+def draw_header(t, *, company, pnr, booking_id, status, show_agency=True):
+    """Wordmark and booking reference on the left, PNR set large on the right.
+
+    An agent issuing on someone else's behalf can drop their own name: the
+    wordmark then reads E-TICKET so the header keeps its shape instead of
+    leaving a hole where the branding was.
+    """
     right = PAGE_W - MARGIN
     size = LOGO_SIZE_MM * MM
 
     # Initials from the company name rather than a hardcoded pair, which was
     # still "AT" from a previous trading name.
-    initials = "".join(word[0] for word in re.findall(r"[A-Za-z]+", company["name"]))[:2].upper()
-    t.rounded(MARGIN, t.at(LOGO_TOP_MM) - size, size, size, 2.2 * MM, fill=INK, stroke=None)
-    t.text(MARGIN + size / 2, t.at(LOGO_TOP_MM) - size / 2 - 3.4, initials or "BH",
-           size=10, font=FONT_BOLD, color=white, align="center")
+    if show_agency:
+        initials = "".join(word[0] for word in re.findall(r"[A-Za-z]+", company["name"]))[:2].upper()
+        t.rounded(MARGIN, t.at(LOGO_TOP_MM) - size, size, size, 2.2 * MM, fill=INK, stroke=None)
+        t.text(MARGIN + size / 2, t.at(LOGO_TOP_MM) - size / 2 - 3.4, initials or "BH",
+               size=10, font=FONT_BOLD, color=white, align="center")
 
     # Set as large as the reference wordmark, then only as small as it must be
     # to clear the PNR block; a long trading name should not run into it.
-    brand_x = MARGIN + size + 2.2 * MM
+    wordmark = company["name"].upper() if show_agency else "E-TICKET"
+    brand_x = (MARGIN + size + 2.2 * MM) if show_agency else MARGIN
     brand_size = 16.5
     room = (PAGE_W - MARGIN - 34 * MM) - brand_x
-    while brand_size > 11 and t.c.stringWidth(company["name"].upper(), FONT_BOLD, brand_size) > room:
+    while brand_size > 11 and t.c.stringWidth(wordmark, FONT_BOLD, brand_size) > room:
         brand_size -= 0.25
-    t.text(brand_x, t.at(BRAND_BASE_MM), company["name"].upper(),
-           size=brand_size, font=FONT_BOLD, color=INK)
+    t.text(brand_x, t.at(BRAND_BASE_MM), wordmark, size=brand_size, font=FONT_BOLD, color=INK)
 
     booking_y = t.at(BOOKING_BASE_MM)
-    subtitle = "E-ticket" + (f"  \u00b7  Booking {booking_id}" if booking_id else "")
+    # Without the agency the wordmark already says E-TICKET, so the line below
+    # carries the reference alone rather than repeating the word.
+    if show_agency:
+        subtitle = "E-ticket" + (f"  \u00b7  Booking {booking_id}" if booking_id else "")
+    else:
+        subtitle = f"Booking {booking_id}" if booking_id else "E-ticket"
     t.text(MARGIN, booking_y, subtitle, size=9, color=MUTED)
 
     # The status has no counterpart on the reference, so it rides the booking
@@ -640,12 +651,14 @@ def draw_fares(t, total_str, *, remarks, gst_company, gstin, show_amount=True):
                            escape("  \u00b7  ".join(details)), size=7.5, leading=4.2 * MM)
 
 
-def draw_footer(t, *, company, issued, contact_line, terms):
+def draw_footer(t, *, company, issued, contact_line, terms, show_agency=True):
     # Measure first: this is the last block on the page, so it only needs to
     # clear the bottom margin, not the larger gap `space()` reserves for cards.
     style = ParagraphStyle("p", fontName=FONT, fontSize=8, leading=TERMS_LEADING_MM * MM)
     _, terms_h = Paragraph(terms, style).wrap(CONTENT_W, 400)
-    needed = (DIVIDER_GAP_MM + ISSUED_GAP_MM) * MM + terms_h + (COMPANY_GAP_MM + 2 * FOOTER_LINE_MM) * MM
+    needed = (DIVIDER_GAP_MM + ISSUED_GAP_MM) * MM + terms_h
+    if show_agency:
+        needed += (COMPANY_GAP_MM + 2 * FOOTER_LINE_MM) * MM
     if t.y - needed < MARGIN:
         t.c.showPage()
         t.y = PAGE_H - MARGIN
@@ -657,6 +670,12 @@ def draw_footer(t, *, company, issued, contact_line, terms):
 
     t.y -= 1.7 * MM
     height = t.paragraph(MARGIN, t.y, CONTENT_W, terms, size=8, leading=TERMS_LEADING_MM * MM)
+    if not show_agency:
+        # Name, address and contact all identify the agency, so the whole
+        # block goes rather than leaving the address behind.
+        t.y -= height
+        return
+
     t.y -= height + (COMPANY_GAP_MM - TERMS_LEADING_MM + 2.6) * MM
     t.text(MARGIN, t.y, company["name"], size=8, font=FONT_BOLD, color=BODY)
     t.y -= FOOTER_LINE_MM * MM

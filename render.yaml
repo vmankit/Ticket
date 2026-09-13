@@ -1,0 +1,36 @@
+# Render blueprint. Docker rather than the native Python runtime because
+# scanned-ticket OCR needs the tesseract binary, which pip cannot install.
+services:
+  - type: web
+    name: bharat-horizon-eticket
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    # A persistent disk needs a paid instance type; on the free tier the
+    # tracker and the booking counter reset on every deploy.
+    plan: starter
+    healthCheckPath: /api/health
+    autoDeployTrigger: commit
+    disk:
+      # The booking tracker and the ID counter live here so a deploy does not
+      # take the agency's records with it.
+      name: ticket-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: SECRET_KEY
+        # Generated once by Render and kept across deploys; the app refuses to
+        # boot in production without it.
+        generateValue: true
+      - key: DATA_DIR
+        value: /var/data
+      - key: FLASK_ENV
+        value: production
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      # Set these in the Render dashboard; sync:false keeps them out of the repo.
+      - key: WHATSAPP_ACCESS_TOKEN
+        sync: false
+      - key: WHATSAPP_PHONE_NUMBER_ID
+        sync: false
+      - key: WHATSAPP_API_VERSION
+        value: v23.0

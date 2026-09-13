@@ -38,8 +38,18 @@ else:
         except:
             pass
 
-EXCEL_FILE = "ticket_records.xlsx"
-COUNTER_FILE = "booking_counter.json"
+# The tracker and the booking counter are the only state the app keeps, and on
+# a host with an ephemeral filesystem - Render rebuilds the container on every
+# deploy - anything written beside the code is lost with it. DATA_DIR points
+# them at a mounted disk there; unset, they stay next to the code as before.
+DATA_DIR = os.environ.get("DATA_DIR", "").strip() or os.path.dirname(os.path.abspath(__file__))
+try:
+    os.makedirs(DATA_DIR, exist_ok=True)
+except OSError:
+    DATA_DIR = os.path.dirname(os.path.abspath(__file__))
+
+EXCEL_FILE = os.path.join(DATA_DIR, "ticket_records.xlsx")
+COUNTER_FILE = os.path.join(DATA_DIR, "booking_counter.json")
 
 # Guards the counter against other threads in this process; the OS file lock
 # below guards it against other processes (e.g. multiple gunicorn workers).

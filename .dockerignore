@@ -1,0 +1,32 @@
+# Keep the image to what actually runs. The repo also carries sample tickets,
+# generated previews and the source data for the airport table, none of which
+# the server reads.
+
+.git
+.gitignore
+.venv
+venv
+__pycache__
+*.pyc
+*.egg-info
+
+# Secrets belong in the host's environment, never baked into an image.
+.env
+
+# Sample tickets and customer data: not needed to serve, and not something to
+# ship inside a container.
+*.pdf
+*.xlsx
+booking_counter.json
+
+# airports_data.py is generated from this and is what the app imports; the CSV
+# is 8 MB of build-time source.
+airport-codes.csv
+
+# Screenshots, notes and developer scratch scripts.
+*.png
+*.md
+*.bat
+_debug_*.txt
+check_pdf.py
+parse_local_pdf.py

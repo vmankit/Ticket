@@ -927,7 +927,12 @@ print(f"[Bharat Horizon Travels] Loaded {len(airline_payload())} airline code ma
 
 @app.route("/")
 def index():
-    return render_template("index.html", fare_types=FARE_TYPES)
+    # The page used to hardcode the trading name and a "BT" monogram while the
+    # PDF derived both from COMPANY, so renaming the agency changed the ticket
+    # but not the site it was issued from.
+    initials = "".join(w[0] for w in re.findall(r"[A-Za-z]+", COMPANY["name"]))[:2].upper()
+    return render_template("index.html", fare_types=FARE_TYPES,
+                           company=COMPANY, initials=initials or "BH")
 
 
 @app.route("/api/search-airports", methods=["GET"])

@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Bharat Horizon Travels — E-Ticket Generator</title>
-    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230e9488'/%3E%3Ctext x='16' y='22' font-family='Arial,sans-serif' font-size='15' font-weight='bold' fill='white' text-anchor='middle'%3EBT%3C/text%3E%3C/svg%3E">
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230e9488'/%3E%3Ctext x='16' y='22' font-family='Arial,sans-serif' font-size='15' font-weight='bold' fill='white' text-anchor='middle'%3E{{ initials }}%3C/text%3E%3C/svg%3E">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <style>
         *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
@@ -12,7 +12,7 @@
         html{scroll-behavior:smooth}
         :root{accent-color:#0e9488}
         :where(input,select,textarea,button,summary):focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-        body{font-family:'Inter',-apple-system,sans-serif;background:linear-gradient(180deg,#f7f9fc 0%,var(--bg) 100%);color:var(--text);min-height:100vh;line-height:1.6}
+        body{font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;background:linear-gradient(180deg,#f7f9fc 0%,var(--bg) 100%);color:var(--text);min-height:100vh;line-height:1.6}
         body::before{content:'';position:fixed;inset:0;background:linear-gradient(90deg,rgba(15,39,66,.05) 1px,transparent 1px),linear-gradient(180deg,rgba(15,39,66,.04) 1px,transparent 1px);background-size:44px 44px;mask-image:linear-gradient(180deg,rgba(0,0,0,.65),transparent 70%);pointer-events:none;z-index:0}
 
         .header{background:var(--primary-dark);padding:24px 0 20px;text-align:left;position:relative;overflow:hidden;box-shadow:0 10px 30px rgba(8,23,39,.18);border-bottom:1px solid rgba(255,255,255,.08)}
@@ -41,7 +41,7 @@
         .form-group.full-width{grid-column:1/-1}
         .form-group label{display:block;font-size:.73rem;font-weight:700;color:var(--text);margin-bottom:6px;letter-spacing:.15px}
         .form-group label .req{color:#e53935;margin-left:2px}
-        .form-group input,.form-group select{width:100%;padding:11px 12px;border:1px solid var(--border);border-radius:8px;font-size:.86rem;font-family:'Inter',sans-serif;color:var(--text);background:#fff;transition:all .2s;outline:none}
+        .form-group input,.form-group select{width:100%;padding:11px 12px;border:1px solid var(--border);border-radius:8px;font-size:.86rem;font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;color:var(--text);background:#fff;transition:all .2s;outline:none}
         .form-group input:focus,.form-group select:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(14,148,136,.12)}
         .form-group input::placeholder{color:#a5afbf}
         .form-group .helper{font-size:.68rem;color:var(--text-muted);margin-top:3px;min-height:14px}
@@ -52,7 +52,7 @@
         .separator{height:1px;background:var(--border);margin:8px 0 24px}
         .link-toggle{background:none;border:none;color:var(--accent);font-weight:700;
             font-size:.76rem;cursor:pointer;padding:6px 0;margin-bottom:10px;
-            font-family:'Inter',sans-serif;text-align:left}
+            font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;text-align:left}
         .link-toggle:hover{text-decoration:underline}
 
         /* Fields the app fills in itself: still editable, but visibly not your job */
@@ -94,14 +94,14 @@
         .layover-indicator{display:flex;align-items:center;justify-content:center;gap:8px;padding:10px;margin-bottom:16px;color:var(--gold);font-size:.78rem;font-weight:600}
         .layover-indicator .layover-line{flex:1;height:1px;background:linear-gradient(90deg,transparent,var(--gold),transparent)}
 
-        .btn-add-flight{display:flex;align-items:center;justify-content:center;gap:6px;width:100%;padding:12px;border:1px dashed #a7b3c2;border-radius:10px;background:#fff;color:var(--primary);font-size:.84rem;font-weight:750;cursor:pointer;transition:all .2s;font-family:'Inter',sans-serif;margin-bottom:20px}
+        .btn-add-flight{display:flex;align-items:center;justify-content:center;gap:6px;width:100%;padding:12px;border:1px dashed #a7b3c2;border-radius:10px;background:#fff;color:var(--primary);font-size:.84rem;font-weight:750;cursor:pointer;transition:all .2s;font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;margin-bottom:20px}
         .btn-add-flight:hover{border-color:var(--accent);background:var(--accent-soft);color:#08766d}
 
         /* Passenger row */
         .pax-row{border:1px solid var(--border);border-radius:10px;padding:18px;margin-bottom:14px;position:relative;background:var(--surface-alt)}
         .pax-row .pax-label{position:absolute;top:-9px;left:14px;background:var(--accent);color:#fff;font-size:.62rem;font-weight:800;padding:2px 9px;border-radius:999px}
         .pax-row .remove-pax{position:absolute;top:6px;right:6px;background:none;border:none;color:var(--danger);cursor:pointer;font-size:1rem;padding:3px 6px;border-radius:5px}
-        .btn-add-pax{display:flex;align-items:center;justify-content:center;gap:6px;width:100%;padding:11px;border:1px dashed #a7b3c2;border-radius:10px;background:#fff;color:var(--accent);font-size:.82rem;font-weight:750;cursor:pointer;transition:all .2s;font-family:'Inter',sans-serif;margin-bottom:20px}
+        .btn-add-pax{display:flex;align-items:center;justify-content:center;gap:6px;width:100%;padding:11px;border:1px dashed #a7b3c2;border-radius:10px;background:#fff;color:var(--accent);font-size:.82rem;font-weight:750;cursor:pointer;transition:all .2s;font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;margin-bottom:20px}
         .btn-add-pax:hover{border-color:var(--accent);background:var(--accent-soft)}
 
         /* Route display */
@@ -140,7 +140,7 @@
 
         /* Submit */
         .submit-section{text-align:center;padding-top:8px;display:flex;justify-content:center;gap:12px;flex-wrap:wrap}
-        .btn-generate{background:var(--accent);color:#fff;border:none;padding:14px 46px;font-size:.96rem;font-weight:800;letter-spacing:.6px;border-radius:10px;cursor:pointer;transition:all .2s;box-shadow:0 12px 28px rgba(14,148,136,.28);font-family:'Inter',sans-serif;position:relative;overflow:hidden}
+        .btn-generate{background:var(--accent);color:#fff;border:none;padding:14px 46px;font-size:.96rem;font-weight:800;letter-spacing:.6px;border-radius:10px;cursor:pointer;transition:all .2s;box-shadow:0 12px 28px rgba(14,148,136,.28);font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;position:relative;overflow:hidden}
         .btn-generate:hover{transform:translateY(-1px);background:#0b7f75;box-shadow:0 16px 34px rgba(14,148,136,.32)}
         .btn-generate:active{transform:translateY(0)}
         .btn-whatsapp{background:#128c7e;box-shadow:0 12px 28px rgba(18,140,126,.24)}
@@ -192,6 +192,33 @@
             .submit-section .btn-generate{width:100%}
         }
 
+        .lbl-short{display:none}
+
+        /* The action bar is pinned, so on a phone every pixel it takes is a
+           pixel of form the agent cannot see. One row, short labels, no
+           wrapping - it was 127px of an 844px screen and is now about 60. */
+        @media(max-width:600px){
+            .lbl-full{display:none}
+            .lbl-short{display:inline}
+            .action-bar{padding:9px 12px;bottom:8px}
+            .action-bar-inner{flex-wrap:nowrap;gap:10px}
+            .action-total .label{display:none}
+            .action-total .value{font-size:1.02rem}
+            .action-buttons{width:auto;flex:1;justify-content:flex-end;gap:8px;flex-wrap:nowrap}
+            .action-bar .btn-generate{flex:0 1 auto;padding:11px 12px;font-size:.74rem;
+                letter-spacing:.3px;white-space:nowrap;box-shadow:none;min-height:42px}
+        }
+
+        /* Touch targets: these read as links but are the only way to reach the
+           fields they hide, and 26px is too small to hit reliably. */
+        /* Touch targets: these read as links but are the only way to reach the
+           fields they hide, and 26px is too small to hit reliably. Width as
+           well as pointer, since a touch device does not always report coarse. */
+        @media(pointer:coarse),(max-width:1024px){
+            .link-toggle{min-height:44px;display:inline-flex;align-items:center}
+            .remove-flight,.remove-pax{min-width:36px;min-height:36px}
+        }
+
         ::-webkit-scrollbar{width:6px}
         ::-webkit-scrollbar-track{background:transparent}
         ::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
@@ -201,9 +228,9 @@
     <div class="header">
         <div class="header-inner">
             <div class="brand-copy">
-                <div class="brand-mark">BT</div>
+                <div class="brand-mark">{{ initials }}</div>
                 <div>
-                    <h1>BHARAT HORIZON TRAVELS</h1>
+                    <h1>{{ company.name }}</h1>
                     <p>Professional E-Ticket Generator</p>
                 </div>
             </div>
@@ -473,10 +500,11 @@
                     </div>
                     <input type="hidden" name="delivery_action" id="deliveryAction" value="download">
                     <div class="action-buttons">
-                        <button type="submit" class="btn-generate" id="submitBtn">Generate E-Ticket PDF</button>
+                        <button type="submit" class="btn-generate" id="submitBtn"><span class="lbl-full">Generate E-Ticket PDF</span><span class="lbl-short">Generate PDF</span></button>
                         <button type="submit" class="btn-generate btn-whatsapp" id="whatsappBtn"
                                 onclick="document.getElementById('deliveryAction').value='whatsapp'">
-                            Send on WhatsApp
+                            <span class="lbl-full">Send on WhatsApp</span>
+                            <span class="lbl-short">WhatsApp</span>
                         </button>
                     </div>
                 </div>
@@ -1011,7 +1039,6 @@ function applyExtractedData(data){
     }
 
     let status=`Filled ${flights.length||1} flight(s), ${pax.length||1} passenger(s). Review and adjust any missing fields.`;
-    if(data.raw_excerpt)status+=` Text sample: ${data.raw_excerpt.slice(0,220)}...`;
     return status;
 }
 
@@ -1083,6 +1110,9 @@ if(extractBtn){
         const file=fileInput&&fileInput.files?fileInput.files[0]:null;
         if(!file){statusEl.textContent='Please select a PDF first.';return;}
         statusEl.textContent='Extracting ticket details...';
+        const extractHTML=extractBtn.innerHTML;
+        extractBtn.disabled=true;
+        extractBtn.innerHTML='<span class="spinner"></span> Parsing...';
         const form=new FormData();
         form.append('ticket_pdf',file);
         try{
@@ -1104,7 +1134,10 @@ if(extractBtn){
             showToast('Ticket parsed. Please review the details.');
         }catch(err){
             console.error('Extraction error:',err);
-            statusEl.innerHTML=`<span style="color:#c24135;font-weight:600;">Network or parsing error. Check console for details.</span>`;
+            statusEl.innerHTML=`<span style="color:#c24135;font-weight:600;">Could not reach the server. Check your connection and try again.</span>`;
+        }finally{
+            extractBtn.disabled=false;
+            extractBtn.innerHTML=extractHTML;
         }
     });
 }
@@ -1132,7 +1165,7 @@ document.getElementById('ticketForm').addEventListener('submit',function(e){
     }
     const btn=e.submitter || document.getElementById('submitBtn');
     if(btn.id==='submitBtn')document.getElementById('deliveryAction').value='download';
-    const originalText=btn.textContent;
+    const originalHTML=btn.innerHTML;
     btn.innerHTML='<span class="spinner"></span> '+(btn.id==='whatsappBtn'?'Sending...':'Generating...');
     btn.disabled=true;
     document.getElementById('submitBtn').disabled=true;
@@ -1141,11 +1174,43 @@ document.getElementById('ticketForm').addEventListener('submit',function(e){
     
     // Restore the button state after a delay so the user can re-generate without reloading
     setTimeout(() => {
-        btn.innerHTML=originalText;
+        btn.innerHTML=originalHTML;
         document.getElementById('submitBtn').disabled=false;
         document.getElementById('whatsappBtn').disabled=false;
     }, 3500);
 });
+
+// ─── Reveal invalid fields before the browser validates ───
+// A required field inside a collapsed card cannot be focused, so Chrome
+// refuses the submission and reports nothing: the Generate button just looks
+// dead. Open whatever card holds the problem before validation runs.
+function revealInvalidFields(){
+    const form=document.getElementById('ticketForm');
+    const bad=Array.from(form.querySelectorAll('input:invalid,select:invalid,textarea:invalid'));
+    bad.forEach(el=>{
+        const card=el.closest('.card');
+        if(card) card.classList.remove('collapsed');
+        const extras=el.closest('[hidden]');
+        if(extras) extras.hidden=false;
+    });
+    if(bad.length){
+        const first=bad[0];
+        first.scrollIntoView({behavior:'smooth', block:'center'});
+        setTimeout(()=>first.focus({preventScroll:true}), 250);
+        showToast(bad.length===1 ? 'One field still needs filling in.'
+                                 : bad.length+' fields still need filling in.');
+    }
+    return bad.length===0;
+}
+['submitBtn','whatsappBtn'].forEach(id=>{
+    document.getElementById(id).addEventListener('click', revealInvalidFields, true);
+});
+// Backstop: fires per field during the browser's own check, in case a field
+// became invalid after the click handler ran.
+document.getElementById('ticketForm').addEventListener('invalid', e=>{
+    const card=e.target.closest('.card');
+    if(card) card.classList.remove('collapsed');
+}, true);
 
 // ─── Collapsible sections ─────────────────────────────────
 function setupCollapsibleCards(){

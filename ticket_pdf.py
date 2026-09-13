@@ -604,19 +604,28 @@ def draw_passengers(t, passengers, flights):
             t.y = bottom
 
 
-def draw_fares(t, total_str, *, remarks, gst_company, gstin):
+def draw_fares(t, total_str, *, remarks, gst_company, gstin, show_amount=True):
     """Just the amount paid: the ticket states what was charged, not how it
     was arrived at. The label shares the amount's baseline so the two are
-    read back as a single line."""
+    read back as a single line.
+
+    An agent handing the ticket to the traveller rather than the payer can
+    leave the amount off; the booking still records what was charged.
+    """
     t.space(20 * MM)
     right = PAGE_W - MARGIN
     t.y -= AMOUNT_GAP_MM * MM
 
-    label = "Amount Paid"
-    value_w = t.c.stringWidth(total_str, FONT_BOLD, 11.5)
-    label_w = t.c.stringWidth(label.upper(), FONT_BOLD, 7.6) + len(label) * 1.4
-    t.tracked(right - value_w - 3.3 * MM - label_w, t.y, label, size=7.6, tracking=1.4)
-    t.text(right, t.y, total_str, size=11.5, font=FONT_BOLD, color=INK, align="right")
+    if show_amount:
+        label = "Amount Paid"
+        value_w = t.c.stringWidth(total_str, FONT_BOLD, 11.5)
+        label_w = t.c.stringWidth(label.upper(), FONT_BOLD, 7.6) + len(label) * 1.4
+        t.tracked(right - value_w - 3.3 * MM - label_w, t.y, label, size=7.6, tracking=1.4)
+        t.text(right, t.y, total_str, size=11.5, font=FONT_BOLD, color=INK, align="right")
+    else:
+        # Nothing on this line, so give the footer back the room it would
+        # have taken rather than leaving a gap where a figure used to be.
+        t.y += AMOUNT_GAP_MM * MM
 
     details = []
     if remarks:

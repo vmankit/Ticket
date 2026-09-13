@@ -1285,6 +1285,8 @@ def generate_ticket():
         fare_type = "REGULAR"
     booking_platform = request.form.get("booking_platform", "Direct")
     is_dummy = request.form.get("is_dummy") == "true"
+    # Kept out of the printed ticket, not out of the tracker.
+    hide_fare = request.form.get("hide_fare") == "true"
 
     ticket_status = request.form.get("ticket_status", "Confirmed").strip() or "Confirmed"
     if ticket_status not in TICKET_STATUSES:
@@ -1557,7 +1559,7 @@ def generate_ticket():
     draw_passengers(t, passengers, flights)
 
     draw_fares(t, total_fare_str, remarks=remarks,
-               gst_company=gst_company, gstin=gstin)
+               gst_company=gst_company, gstin=gstin, show_amount=not hide_fare)
 
     draw_footer(
         t,

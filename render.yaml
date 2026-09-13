@@ -27,10 +27,3 @@ services:
         value: production
       - key: PYTHONUNBUFFERED
         value: "1"
-      # Set these in the Render dashboard; sync:false keeps them out of the repo.
-      - key: WHATSAPP_ACCESS_TOKEN
-        sync: false
-      - key: WHATSAPP_PHONE_NUMBER_ID
-        sync: false
-      - key: WHATSAPP_API_VERSION
-        value: v23.0

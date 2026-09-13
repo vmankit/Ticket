@@ -5,7 +5,6 @@ from reportlab.platypus import Table, TableStyle, Paragraph, Spacer, Image
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.pdfgen import canvas
 from reportlab.graphics.barcode.code128 import Code128
-import base64
 import io
 import json
 import logging
@@ -14,8 +13,6 @@ import re
 import tempfile
 import uuid
 from html import escape
-import urllib.error
-import urllib.request
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from functools import lru_cache
@@ -786,144 +783,6 @@ def extract_ticket_fields(text, filename=""):
     }
 
 
-def normalize_whatsapp_number(phone):
-    """Normalize phone number to WhatsApp format (with country code).
-    
-    Handles various formats:
-    - Indian: 9876543210, 09876543210 → 919876543210
-    - With +91: +919876543210 → 919876543210
-    - Invalid formats are rejected
-    """
-    if not phone:
-        return ""
-    
-    # Remove all non-digit characters
-    digits = re.sub(r"\D", "", str(phone))
-    
-    # Reject if obviously invalid
-    if len(digits) < 10 or len(digits) > 15:
-        return ""
-    
-    # Handle India numbers (10 or 11 digits)
-    if len(digits) == 11 and digits.startswith("0"):
-        digits = digits[1:]  # Remove leading 0
-    
-    if len(digits) == 10:
-        # Assume India if exactly 10 digits
-        digits = "91" + digits
-    elif len(digits) == 12 and digits.startswith("91"):
-        # Already has India country code
-        pass
-    else:
-        # For other countries, accept if 11-13 digits with country code
-        if len(digits) < 11 or len(digits) > 15:
-            return ""
-    
-    return digits
-
-
-def encode_multipart_form(fields, files):
-    boundary = "----AnkitTravelsBoundary" + datetime.now().strftime("%Y%m%d%H%M%S%f")
-    chunks = []
-    for name, value in fields.items():
-        chunks.extend([
-            f"--{boundary}\r\n".encode(),
-            f'Content-Disposition: form-data; name="{name}"\r\n\r\n'.encode(),
-            str(value).encode(),
-            b"\r\n",
-        ])
-    for name, file_info in files.items():
-        filename, content_type, data = file_info
-        chunks.extend([
-            f"--{boundary}\r\n".encode(),
-            f'Content-Disposition: form-data; name="{name}"; filename="{filename}"\r\n'.encode(),
-            f"Content-Type: {content_type}\r\n\r\n".encode(),
-            data,
-            b"\r\n",
-        ])
-    chunks.append(f"--{boundary}--\r\n".encode())
-    return boundary, b"".join(chunks)
-
-
-def whatsapp_graph_request(path, payload=None, method="POST", content_type="application/json"):
-    """Make WhatsApp Cloud API request with retry logic."""
-    token = os.getenv("WHATSAPP_ACCESS_TOKEN", "").strip()
-    phone_number_id = os.getenv("WHATSAPP_PHONE_NUMBER_ID", "").strip()
-    api_version = os.getenv("WHATSAPP_API_VERSION", "v23.0").strip()
-    if not token or not phone_number_id:
-        raise RuntimeError("WhatsApp Cloud API is not configured. Set WHATSAPP_ACCESS_TOKEN and WHATSAPP_PHONE_NUMBER_ID.")
-
-    url = f"https://graph.facebook.com/{api_version}/{phone_number_id}/{path.lstrip('/')}"
-    data = None
-    headers = {"Authorization": f"Bearer {token}", "User-Agent": "AnkitTravelsTicketGenerator/1.0"}
-    if payload is not None:
-        data = payload if isinstance(payload, bytes) else json.dumps(payload).encode("utf-8")
-        headers["Content-Type"] = content_type
-
-    req = urllib.request.Request(url, data=data, headers=headers, method=method)
-    try:
-        with urllib.request.urlopen(req, timeout=20) as response:
-            body = response.read().decode("utf-8")
-            return json.loads(body) if body else {}
-    except urllib.error.HTTPError as exc:
-        body = exc.read().decode("utf-8", errors="replace")
-        try:
-            error_data = json.loads(body)
-            error_msg = error_data.get("error", {})
-            if isinstance(error_msg, dict):
-                error_text = error_msg.get("message", str(error_msg))
-            else:
-                error_text = str(error_msg)
-            raise RuntimeError(f"WhatsApp API error {exc.code}: {error_text}")
-        except (json.JSONDecodeError, TypeError):
-            raise RuntimeError(f"WhatsApp API error {exc.code}: {body[:200]}")
-    except urllib.error.URLError as exc:
-        # DNS failure, refused connection or timeout — the most common real
-        # failures. Surface them like the HTTP errors instead of raw urllib.
-        raise RuntimeError(
-            f"Could not reach the WhatsApp API ({exc.reason}). "
-            "Check the server's network connection and try again."
-        )
-
-
-def send_pdf_to_whatsapp(pdf_bytes, filename, to_phone, caption):
-    recipient = normalize_whatsapp_number(to_phone)
-    if not recipient or len(recipient) < 11:
-        raise RuntimeError("Customer WhatsApp number is invalid. Use country code, e.g. +91XXXXXXXXXX.")
-
-    boundary, body = encode_multipart_form(
-        fields={"messaging_product": "whatsapp", "type": "application/pdf"},
-        files={"file": (filename, "application/pdf", pdf_bytes)},
-    )
-    media_response = whatsapp_graph_request("media", payload=body, content_type=f"multipart/form-data; boundary={boundary}")
-    media_id = media_response.get("id")
-    if not media_id:
-        raise RuntimeError(f"WhatsApp media upload did not return a media id: {media_response}")
-
-    message_payload = {
-        "messaging_product": "whatsapp",
-        "recipient_type": "individual",
-        "to": recipient,
-        "type": "document",
-        "document": {
-            "id": media_id,
-            "filename": filename,
-            "caption": caption[:1024],
-        },
-    }
-    return {
-        "recipient": recipient,
-        "api_response": whatsapp_graph_request("messages", payload=message_payload),
-    }
-
-
-print(f"[Bharat Horizon Travels] Loaded {len(AIRPORTS_DB)} airports from CSV database")
-print(f"[Bharat Horizon Travels] Loaded {len(airline_payload())} airline code mappings")
-
-
-# ═══════════════════════════════════════════════════════════════
-# ROUTES
-# ═══════════════════════════════════════════════════════════════
 
 @app.route("/")
 def index():
@@ -1010,20 +869,6 @@ def health():
         "airports": len(AIRPORTS_DB),
         "airlines": len(airline_payload()),
         "ocr": ocr_available(),
-        "whatsapp": bool(
-            os.getenv("WHATSAPP_ACCESS_TOKEN", "").strip()
-            and os.getenv("WHATSAPP_PHONE_NUMBER_ID", "").strip()
-        ),
-    })
-
-
-@app.route("/api/whatsapp-config", methods=["GET"])
-def whatsapp_config():
-    load_local_env()
-    return jsonify({
-        "access_token_configured": bool(os.getenv("WHATSAPP_ACCESS_TOKEN", "").strip()),
-        "phone_number_id_configured": bool(os.getenv("WHATSAPP_PHONE_NUMBER_ID", "").strip()),
-        "api_version": os.getenv("WHATSAPP_API_VERSION", "v23.0").strip(),
     })
 
 
@@ -1633,86 +1478,6 @@ def generate_ticket():
     buffer.seek(0)
 
     dl_name = f"Ticket_{pnr or booking_id or 'output'}.pdf"
-    if request.form.get("delivery_action") == "whatsapp":
-        caption = (
-            f"Dear {lead_pax}, your e-ticket is attached.\n"
-            f"PNR: {pnr or '-'}\n"
-            f"Route: {route_summary}\n"
-            f"Travel Date: {travel_date_val or '-'}\n\n"
-            f"Regards,\n{COMPANY['name']}"
-        )
-        try:
-            result = send_pdf_to_whatsapp(pdf_bytes, dl_name, customer_phone, caption)
-            api_resp = result.get("api_response", {})
-            message_id = ""
-            if api_resp.get("messages"):
-                message_id = api_resp["messages"][0].get("id", "")
-            return render_template_string("""
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WhatsApp Sent</title>
-    <style>
-        body{font-family:Inter,Arial,sans-serif;background:#eef2f6;color:#162033;margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center}
-        .box{background:#fff;border:1px solid #d9e0ea;border-radius:12px;box-shadow:0 24px 70px rgba(15,39,66,.12);padding:30px;max-width:520px}
-        h1{margin:0 0 8px;color:#0f2742;font-size:24px}
-        p{color:#667085;line-height:1.55}
-        .ok{display:inline-block;background:#e7f7f5;color:#0e9488;padding:6px 10px;border-radius:999px;font-weight:800;font-size:12px;margin-bottom:14px}
-        a{display:inline-block;margin-top:14px;background:#0e9488;color:#fff;text-decoration:none;padding:12px 18px;border-radius:10px;font-weight:800}
-        small{display:block;margin-top:16px;color:#667085;word-break:break-all}
-    </style>
-</head>
-<body>
-    <div class="box">
-        <div class="ok">WHATSAPP SENT</div>
-        <h1>Ticket sent to {{ phone }}</h1>
-        <p>The generated PDF ticket was uploaded and sent as a WhatsApp document.</p>
-        <a href="/">Create another ticket</a>
-        {% if message_id %}<small>Message ID: {{ message_id }}</small>{% endif %}
-    </div>
-</body>
-</html>
-            """, phone=customer_phone, message_id=message_id)
-        except Exception as e:
-            log.exception("WhatsApp delivery failed")
-            return render_template_string("""
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WhatsApp Not Sent</title>
-    <style>
-        body{font-family:Inter,Arial,sans-serif;background:#eef2f6;color:#162033;margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center}
-        .box{background:#fff;border:1px solid #d9e0ea;border-radius:12px;box-shadow:0 24px 70px rgba(15,39,66,.12);padding:30px;max-width:620px}
-        h1{margin:0 0 8px;color:#0f2742;font-size:24px}
-        p{color:#667085;line-height:1.55}
-        .bad{display:inline-block;background:#fff1f0;color:#c24135;padding:6px 10px;border-radius:999px;font-weight:800;font-size:12px;margin-bottom:14px}
-        pre{white-space:pre-wrap;background:#f6f8fb;border:1px solid #d9e0ea;border-radius:8px;padding:12px;color:#162033;font-size:12px}
-        a{display:inline-block;margin-top:14px;margin-right:10px;background:#0f2742;color:#fff;text-decoration:none;padding:12px 18px;border-radius:10px;font-weight:800}
-        a.primary{background:#0e9488}
-    </style>
-</head>
-<body>
-    <div class="box">
-        <div class="bad">WHATSAPP NOT SENT</div>
-        <h1>Ticket generated, but WhatsApp failed</h1>
-        <p>The ticket itself is fine — download it below and send it manually,
-           or fix the problem and generate again.</p>
-        <pre>{{ error }}</pre>
-        <a class="primary" href="data:application/pdf;base64,{{ pdf_b64 }}" download="{{ filename }}">Download the ticket</a>
-        <a href="/">Back to generator</a>
-    </div>
-</body>
-</html>
-            """,
-                error=str(e),
-                pdf_b64=base64.b64encode(pdf_bytes).decode("ascii"),
-                filename=dl_name,
-            ), 500
-
     return send_file(buffer, as_attachment=True, download_name=dl_name, mimetype="application/pdf")
 
 

@@ -143,8 +143,6 @@
         .btn-generate{background:var(--accent);color:#fff;border:none;padding:14px 46px;font-size:.96rem;font-weight:800;letter-spacing:.6px;border-radius:10px;cursor:pointer;transition:all .2s;box-shadow:0 12px 28px rgba(14,148,136,.28);font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;position:relative;overflow:hidden}
         .btn-generate:hover{transform:translateY(-1px);background:#0b7f75;box-shadow:0 16px 34px rgba(14,148,136,.32)}
         .btn-generate:active{transform:translateY(0)}
-        .btn-whatsapp{background:#128c7e;box-shadow:0 12px 28px rgba(18,140,126,.24)}
-        .btn-whatsapp:hover{background:#0f766b;box-shadow:0 16px 34px rgba(18,140,126,.3)}
 
         /* Sticky action bar — the form is long, so the running total and the
            generate buttons stay reachable instead of living at the bottom. */
@@ -498,14 +496,8 @@
                         <span class="label">Total Payable</span>
                         <span class="value" id="fareTotalDisplay">INR 0.00</span>
                     </div>
-                    <input type="hidden" name="delivery_action" id="deliveryAction" value="download">
                     <div class="action-buttons">
                         <button type="submit" class="btn-generate" id="submitBtn"><span class="lbl-full">Generate E-Ticket PDF</span><span class="lbl-short">Generate PDF</span></button>
-                        <button type="submit" class="btn-generate btn-whatsapp" id="whatsappBtn"
-                                onclick="document.getElementById('deliveryAction').value='whatsapp'">
-                            <span class="lbl-full">Send on WhatsApp</span>
-                            <span class="lbl-short">WhatsApp</span>
-                        </button>
                     </div>
                 </div>
             </div>
@@ -1163,20 +1155,16 @@ document.getElementById('ticketForm').addEventListener('submit',function(e){
         if(dep&&depFmt)depFmt.value=formatTime12(dep.value);
         if(arr&&arrFmt)arrFmt.value=formatTime12(arr.value);
     }
-    const btn=e.submitter || document.getElementById('submitBtn');
-    if(btn.id==='submitBtn')document.getElementById('deliveryAction').value='download';
+    const btn=document.getElementById('submitBtn');
     const originalHTML=btn.innerHTML;
-    btn.innerHTML='<span class="spinner"></span> '+(btn.id==='whatsappBtn'?'Sending...':'Generating...');
+    btn.innerHTML='<span class="spinner"></span> Generating...';
     btn.disabled=true;
-    document.getElementById('submitBtn').disabled=true;
-    document.getElementById('whatsappBtn').disabled=true;
-    showToast(btn.id==='whatsappBtn'?'Generating and sending on WhatsApp...':'Generating your e-ticket...');
-    
+    showToast('Generating your e-ticket...');
+
     // Restore the button state after a delay so the user can re-generate without reloading
     setTimeout(() => {
         btn.innerHTML=originalHTML;
-        document.getElementById('submitBtn').disabled=false;
-        document.getElementById('whatsappBtn').disabled=false;
+        btn.disabled=false;
     }, 3500);
 });
 
@@ -1202,9 +1190,7 @@ function revealInvalidFields(){
     }
     return bad.length===0;
 }
-['submitBtn','whatsappBtn'].forEach(id=>{
-    document.getElementById(id).addEventListener('click', revealInvalidFields, true);
-});
+document.getElementById('submitBtn').addEventListener('click', revealInvalidFields, true);
 // Backstop: fires per field during the browser's own check, in case a field
 // became invalid after the click handler ran.
 document.getElementById('ticketForm').addEventListener('invalid', e=>{

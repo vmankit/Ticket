@@ -1,14 +1,6 @@
-import random
 import io
 import qrcode
 from datetime import datetime, timedelta
-from config import AIRLINE_NUMERIC_CODES
-
-def generate_ticket_number(airline_code: str) -> str:
-    """Generates a realistic 13-digit ticket number (e.g. 890-4521789630)"""
-    numeric = AIRLINE_NUMERIC_CODES.get(airline_code.upper(), "000")
-    serial = "".join([str(random.randint(0, 9)) for _ in range(10)])
-    return f"{numeric}-{serial}"
 
 def get_checkin_closing(dep_time_raw: str, route_type="domestic"):
     """Returns check-in closing time (45 mins prior for domestic, 60 for international)."""

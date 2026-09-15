@@ -49,6 +49,7 @@ from ticket_parsing import (
     ocr_available,
     ocr_pdf_bytes,
     parse_agency_ticket,
+    parse_columnar_ticket,
     parse_own_ticket,
     parse_stacked_itinerary,
 )
@@ -428,7 +429,7 @@ def detect_platform(text_upper, filename=""):
     return ""
 
 
-def extract_ticket_fields(text, filename=""):
+def extract_ticket_fields(text, filename="", pages_words=None):
     # Typographic dashes and currency signs are common in issuer PDFs and stop
     # every ASCII pattern below from matching.
     text = normalize_text(text or "")
@@ -436,6 +437,23 @@ def extract_ticket_fields(text, filename=""):
     lines = [line.strip() for line in text.splitlines() if line.strip()]
 
     platform = detect_platform(text_upper, filename)
+
+    # Some agency tickets lay the itinerary out as a real table. Flattened to
+    # text those columns interleave, so they are read from word positions
+    # instead - but only when that table is actually present.
+    if pages_words and not looks_like_own_ticket(text_upper):
+        try:
+            columnar = parse_columnar_ticket(pages_words)
+        except Exception:
+            log.exception("Columnar parse failed; falling back to the text parsers.")
+            columnar = {}
+        if columnar.get("flights") and (columnar.get("pnr") or columnar.get("booking_id")):
+            columnar["booking_platform"] = platform or "Direct/Walk-in"
+            columnar.setdefault("customer_email", "")
+            columnar.setdefault("customer_phone", "")
+            columnar.setdefault("base_fare", "")
+            columnar.setdefault("taxes_fees", "")
+            return columnar
 
     # Tickets this app generated have a known layout, so read them directly
     # rather than putting them through the heuristics meant for OTA formats.
@@ -908,8 +926,12 @@ def parse_ticket():
 
     try:
         data = upload.read()
+        pages_words = []
         with pdfplumber.open(io.BytesIO(data)) as pdf:
             pages = [page.extract_text() or "" for page in pdf.pages]
+            # Word boxes as well as text: a table's columns only survive as
+            # coordinates, and flattening them to lines scrambles the rows.
+            pages_words = [page.extract_words() or [] for page in pdf.pages]
         text = "\n".join(pages).strip()
     except Exception as exc:
         log.error("Failed to read PDF: %s", exc)
@@ -940,7 +962,7 @@ def parse_ticket():
 
     log.info("Processing %s - %d chars%s", filename, len(text), " via OCR" if used_ocr else "")
 
-    extracted = extract_ticket_fields(text, filename=filename)
+    extracted = extract_ticket_fields(text, filename=filename, pages_words=pages_words)
     
     if not extracted.get("pnr") and not extracted.get("booking_id") and not extracted.get("flights"):
         if not extracted.get("booking_platform"):

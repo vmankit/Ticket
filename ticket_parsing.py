@@ -571,3 +571,236 @@ def _parse_own_current(text):
         })
 
     return result
+
+
+# ── Columnar agency/invoice tickets ──────────────────────────────────────
+# Some agency back-offices lay the itinerary out as a real table: Flight,
+# Departure, Duration, Arrival side by side, with each cell wrapping onto its
+# own line. Flattened to text the columns interleave — the arrival airport
+# lands above the flight number, and a passenger's surname below their row
+# number — so these are read from word positions instead, where a column is
+# just a range of x.
+
+COLUMNAR_FLIGHT_HEADERS = ("Flight", "Departure", "Duration", "Arrival")
+COLUMNAR_PAX_HEADERS = ("Sr No.", "PAX Type", "Passenger Name", "Gender")
+
+
+def _group_word_lines(words, tolerance=2.5):
+    """Group words into visual lines, since a cell's baseline can wobble."""
+    lines = []
+    for word in sorted(words, key=lambda w: (round(w["top"], 1), w["x0"])):
+        if lines and abs(word["top"] - lines[-1][0]) <= tolerance:
+            lines[-1][1].append(word)
+        else:
+            lines.append((word["top"], [word]))
+    return [(top, sorted(ws, key=lambda w: w["x0"])) for top, ws in lines]
+
+
+def _column_bounds(line_words, headers):
+    """Left edge of each named column, or None if this is not that header row."""
+    joined = " ".join(w["text"] for w in line_words).upper()
+    if not all(h.upper() in joined for h in headers):
+        return None
+    bounds = []
+    for header in headers:
+        first = header.split()[0].upper().rstrip(".")
+        match = next((w for w in line_words
+                      if w["text"].upper().rstrip(".").startswith(first)), None)
+        if match is None:
+            return None
+        bounds.append(match["x0"])
+    return bounds if bounds == sorted(bounds) else None
+
+
+def _column_of(word, bounds):
+    for i in range(len(bounds) - 1, -1, -1):
+        if word["x0"] >= bounds[i] - 1:
+            return i
+    return 0
+
+
+def _find_table(lines, headers):
+    """(index of the header line, column left edges) for the first match."""
+    for i, (_top, line_words) in enumerate(lines):
+        bounds = _column_bounds(line_words, headers)
+        if bounds:
+            return i, bounds
+    return None, None
+
+
+def _stop_row(line_words, markers):
+    joined = " ".join(w["text"] for w in line_words).upper()
+    return any(m in joined for m in markers)
+
+
+def _cell_block(lines, start, bounds, stop_markers):
+    """Concatenate each column's text down the table body."""
+    columns = ["" for _ in bounds]
+    for _top, line_words in lines[start:]:
+        if _stop_row(line_words, stop_markers):
+            break
+        for word in line_words:
+            idx = _column_of(word, bounds)
+            columns[idx] = (columns[idx] + " " + word["text"]).strip()
+    return columns
+
+
+def _iso_from_words(chunk):
+    match = re.search(r"\b(\d{1,2})\s+([A-Za-z]{3})[a-z]*,?\s+(\d{4})", chunk)
+    if not match:
+        return ""
+    month = MONTHS.get(match.group(2).upper()[:3])
+    if not month:
+        return ""
+    return f"{match.group(3)}-{month:02d}-{int(match.group(1)):02d}"
+
+
+def _endpoint(chunk):
+    """Date, 24h time and terminal out of one side of the itinerary row."""
+    out = {}
+    iso = _iso_from_words(chunk)
+    if iso:
+        out["date"] = iso
+    time = re.search(r"\b(\d{1,2}):([0-5]\d)\b", chunk)
+    if time:
+        out["time"] = f"{int(time.group(1)):02d}:{time.group(2)}"
+    terminal = re.search(r"Terminal\s*:?\s*([A-Za-z0-9]{1,4})", chunk, re.I)
+    if terminal:
+        out["terminal"] = terminal.group(1)
+    code = re.search(r"\(([A-Z]{3})\)", chunk)
+    if code:
+        out["code"] = code.group(1)
+    return out
+
+
+def _columnar_passengers(lines, header_idx, bounds):
+    """Rows keyed on the serial number, with wrapped names pulled back in.
+
+    A long name wraps above and below its own row number, so each name
+    fragment is given to the serial number it sits closest to rather than to
+    whichever line it happens to share.
+    """
+    body = []
+    for top, line_words in lines[header_idx + 1:]:
+        if _stop_row(line_words, ("OTHER DETAILS", "FARE DETAILS", "TOTAL AMOUNT")):
+            break
+        body.append((top, line_words))
+
+    anchors = []
+    for top, line_words in body:
+        for word in line_words:
+            if _column_of(word, bounds) == 0 and re.fullmatch(r"\d{1,2}", word["text"]):
+                anchors.append({"top": top, "sr": int(word["text"]),
+                                "name": [], "pax_type": "", "gender": ""})
+                break
+    if not anchors:
+        return []
+
+    for top, line_words in body:
+        nearest = min(anchors, key=lambda a: abs(a["top"] - top))
+        for word in line_words:
+            col = _column_of(word, bounds)
+            if col == 1 and not nearest["pax_type"] and word["text"].isalpha():
+                nearest["pax_type"] = word["text"].title()
+            elif col == 2:
+                nearest["name"].append(word["text"])
+            elif col == 3 and not nearest["gender"] and word["text"].isalpha():
+                nearest["gender"] = word["text"].title()
+
+    passengers = []
+    for anchor in sorted(anchors, key=lambda a: a["sr"]):
+        name = " ".join(anchor["name"]).strip()
+        title = ""
+        lead = re.match(r"^(MR|MRS|MS|MSTR|DR)\b\.?\s+", name, re.I)
+        if lead:
+            title = lead.group(1).title()
+            title = {"Mr": "Mr", "Mrs": "Mrs", "Ms": "Ms",
+                     "Mstr": "Mstr", "Dr": "Dr"}.get(title, "")
+            name = name[lead.end():]
+        if not name:
+            continue
+        entry = {"name": name.strip()}
+        if title:
+            entry["title"] = title
+        if anchor["pax_type"] in ("Adult", "Child", "Infant"):
+            entry["pax_type"] = anchor["pax_type"]
+        passengers.append(entry)
+    return passengers
+
+
+def parse_columnar_ticket(pages_words):
+    """Read a columnar agency ticket from per-page word boxes.
+
+    Returns {} unless the itinerary table is actually found, so the caller can
+    fall through to the text-based parsers for every other layout.
+    """
+    result = {}
+    all_words = [w for page in pages_words for w in page]
+    if not all_words:
+        return {}
+    flat = " ".join(w["text"] for w in all_words)
+
+    lines = _group_word_lines(pages_words[0])
+    header_idx, bounds = _find_table(lines, COLUMNAR_FLIGHT_HEADERS)
+    if header_idx is None:
+        return {}
+
+    flight_col, dep_col, dur_col, arr_col = _cell_block(
+        lines, header_idx + 1, bounds, ("PASSENGER DETAILS", "OTHER DETAILS"))
+
+    segment = {}
+    number = re.match(r"([A-Z0-9]{2})\s*-?\s*(\d{2,4})\b\s*(.*)", flight_col.upper())
+    if number:
+        segment["flight_no"] = f"{number.group(1)} {number.group(2)}"
+        airline = flight_col[number.end(2):].strip(" -")
+        if airline:
+            segment["airline"] = airline.title()
+    departure, arrival = _endpoint(dep_col), _endpoint(arr_col)
+
+    # The header carries the route as "CITY (AAA) - CITY (BBB)", which is
+    # cleaner than digging it out of either cell.
+    route = re.search(r"\(([A-Z]{3})\)\s*-\s*[A-Za-z .]+\(([A-Z]{3})\)", flat)
+    segment["from_code"] = (route.group(1) if route else departure.get("code", ""))
+    segment["to_code"] = (route.group(2) if route else arrival.get("code", ""))
+    if departure.get("date"):
+        segment["date"] = departure["date"]
+    if departure.get("time"):
+        segment["dep_time_raw"] = departure["time"]
+    if arrival.get("time"):
+        segment["arr_time_raw"] = arrival["time"]
+    if departure.get("terminal"):
+        segment["from_terminal"] = departure["terminal"]
+    if arrival.get("terminal"):
+        segment["to_terminal"] = arrival["terminal"]
+
+    cabin = re.search(r"(\d{1,2}\s*KG)\s*(?:HAND|CABIN)", flat, re.I)
+    if cabin:
+        segment["hand_bag"] = cabin.group(1).upper().replace(" ", " ")
+    checkin = re.search(r"(\d{1,2}\s*KG)\s*(?:CHECK[- ]?IN)", flat, re.I)
+    if checkin:
+        segment["checkin_bag"] = checkin.group(1).upper()
+
+    if segment.get("flight_no") and segment.get("from_code") and segment.get("to_code"):
+        result["flights"] = [segment]
+
+    pnr = re.search(r"Airline\s*PNR\s*:?\s*([A-Z0-9]{5,8})\b", flat, re.I)
+    if pnr:
+        result["pnr"] = pnr.group(1).upper()
+    ref = re.search(r"Reference\s*Number\s*:?\s*([A-Z0-9]{5,14})\b", flat, re.I)
+    if ref:
+        result["booking_id"] = ref.group(1).upper()
+    booked = re.search(r"Booking\s*Date\s*:?\s*(\d{4}-\d{2}-\d{2})", flat, re.I)
+    if booked:
+        result["booking_date"] = booked.group(1)
+    total = re.search(r"Total\s*Amount\D{0,40}?" + MONEY_RE, flat, re.I)
+    if total:
+        result["total_fare"] = total.group(1).replace(",", "")
+    if re.search(r"\bnon[- ]?refundable\b", flat, re.I):
+        result["refund_status"] = "Non-Refundable"
+
+    pax_idx, pax_bounds = _find_table(lines, COLUMNAR_PAX_HEADERS)
+    if pax_idx is not None:
+        passengers = _columnar_passengers(lines, pax_idx, pax_bounds)
+        if passengers:
+            result["passengers"] = passengers
+    return result

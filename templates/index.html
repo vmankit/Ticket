@@ -969,6 +969,22 @@ function resetPassengers(count){
     updatePassengerSegmentFields();
 }
 
+function setSelectValue(el, wanted){
+    if(!el || !wanted) return false;
+    const want=String(wanted).toUpperCase().replace(/\s+/g,'');
+    for(const opt of el.options){
+        if(opt.value.toUpperCase().replace(/\s+/g,'')===want){el.value=opt.value;return true;}
+    }
+    // "7KG" from a ticket should still find "7 KG (1 Piece)".
+    const kg=want.match(/(\d{1,2})KG/);
+    if(kg){
+        for(const opt of el.options){
+            if(opt.value.toUpperCase().replace(/\s+/g,'').startsWith(kg[1]+'KG')){el.value=opt.value;return true;}
+        }
+    }
+    return false;
+}
+
 function applyExtractedData(data){
     if(!data)return'No data extracted.';
     if(data.booking_platform)setInputValue('booking_platform',data.booking_platform);
@@ -1001,7 +1017,13 @@ function applyExtractedData(data){
         if(f.dep_time_raw)document.getElementById('fdep_'+i).value=f.dep_time_raw;
         if(f.arr_time_raw)document.getElementById('farr_'+i).value=f.arr_time_raw;
         if(f.dep_time_raw&&f.arr_time_raw)calcDur('fdep_'+i,'farr_'+i,'fdur_'+i);
+        const term=(n,v)=>{const el=document.querySelector(`[name="flight_${i}_${n}"]`); if(el&&v)el.value=v;};
+        term('from_terminal', f.from_terminal); term('to_terminal', f.to_terminal);
+        setSelectValue(document.querySelector(`[name="flight_${i}_checkin_bag"]`), f.checkin_bag);
+        setSelectValue(document.querySelector(`[name="flight_${i}_hand_bag"]`), f.hand_bag);
+        if(f.class)setSelectValue(document.querySelector(`[name="flight_${i}_class"]`), f.class);
     });
+    if(data.refund_status)setSelectValue(document.querySelector('[name="refund_status"]'), data.refund_status);
 
     const pax=Array.isArray(data.passengers)?data.passengers:[];
     resetPassengers(pax.length||1);
@@ -1009,6 +1031,8 @@ function applyExtractedData(data){
         if(p.name)document.querySelector(`[name="pax_${i}_name"]`).value=p.name;
         if(p.dob)document.querySelector(`[name="pax_${i}_dob"]`).value=p.dob;
         if(p.passport)document.querySelector(`[name="pax_${i}_passport"]`).value=p.passport;
+        setSelectValue(document.querySelector(`[name="pax_${i}_title"]`), p.title);
+        setSelectValue(document.querySelector(`[name="pax_${i}_type"]`), p.pax_type);
     });
 
     // Ensure per-passenger per-segment fields are created and pre-filled from flight-level data

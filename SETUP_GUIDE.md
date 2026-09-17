@@ -22,6 +22,27 @@ curl http://localhost:5000/api/health
 If `ocr` is `false`, digital PDFs still parse normally — only scanned uploads
 fall back to manual entry, with a message saying so.
 
+### What the reader handles
+
+A scanned upload is straightened and cleaned up before it is read, so the
+following all still parse:
+
+* a page fed in sideways or upside-down (needs `tesseract-ocr-osd`)
+* a page scanned a few degrees off square
+* a faded, over-bright or low-resolution scan
+* a document where only some pages are images - the pages that carry real
+  text keep it, and only the scanned ones are recognised
+
+The reader reports how confident it was. Below 80% the upload message asks
+you to check every field, because a scan is a best guess rather than the
+figures the PDF itself states. Always review a scanned import before
+generating the ticket.
+
+OCR is CPU-bound and takes a few seconds per page, and considerably longer on
+a small instance. `gunicorn` is therefore started with `--timeout 120`; keep
+that if you change how the app is launched, or long uploads will be killed
+mid-read.
+
 **Render note:** the native Python runtime cannot install system packages.
 To enable OCR there, deploy with a Dockerfile that installs `tesseract-ocr`
 before `pip install -r requirements.txt`. Without it the app runs fine; only

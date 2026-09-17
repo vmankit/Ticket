@@ -3,9 +3,12 @@
 FROM python:3.11-slim
 
 # tesseract-ocr powers scanned-ticket upload; the app runs without it, but
-# those uploads then fall back to manual entry.
+# those uploads then fall back to manual entry. The language and orientation
+# data are pulled in as dependencies anyway, but are named here because the
+# parser needs both: -eng to read, -osd to turn a sideways scan upright.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends tesseract-ocr \
+    && apt-get install -y --no-install-recommends \
+        tesseract-ocr tesseract-ocr-eng tesseract-ocr-osd \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

@@ -46,8 +46,9 @@ from ticket_pdf import (
 from ticket_parsing import (
     looks_like_own_ticket,
     normalize_text,
+    OCR_PAGE_TEXT_FLOOR,
     ocr_available,
-    ocr_pdf_bytes,
+    ocr_pdf_pages,
     parse_agency_ticket,
     parse_columnar_ticket,
     parse_own_ticket,
@@ -967,13 +968,37 @@ def parse_ticket():
         return jsonify({"error": f"Failed to read PDF: {exc}"}), 500
 
     # Too little embedded text means the pages are images, so read them with OCR.
+    # A page that carries real text keeps it: OCR is slower and never better
+    # than the characters the PDF already states, so only the scanned pages of
+    # a mixed document are recognised.
     used_ocr = False
-    if len(text) < 50:
-        log.info("Only %d chars of text in %s - trying OCR.", len(text), filename)
-        ocr_text = ocr_pdf_bytes(data)
-        if len(ocr_text) > len(text):
-            text, used_ocr = ocr_text, True
-            log.info("OCR recovered %d chars from %s", len(text), filename)
+    ocr_conf = None
+    blank_pages = {i for i, page in enumerate(pages) if len(page) < OCR_PAGE_TEXT_FLOOR}
+    if not pages or blank_pages:
+        log.info("%d of %d pages in %s carry no readable text - trying OCR.",
+                 len(blank_pages), len(pages) or 1, filename)
+        ocr_pages = ocr_pdf_pages(
+            data, is_airport=is_valid_airport_code,
+            is_airline=lambda code: code in airline_payload(),
+            only_pages=blank_pages or None)
+        if ocr_pages:
+            merged, merged_words = list(pages), list(pages_words)
+            for page in ocr_pages:
+                i = page["index"]
+                # Keep whichever version of the page says more.
+                if i < len(merged) and len(merged[i]) >= max(len(page["text"]), OCR_PAGE_TEXT_FLOOR):
+                    continue
+                while len(merged) <= i:
+                    merged.append("")
+                    merged_words.append([])
+                merged[i], merged_words[i] = page["text"], page["words"]
+                used_ocr = True
+            if used_ocr:
+                text = "\n".join(merged).strip()
+                pages, pages_words = merged, merged_words
+                ocr_conf = round(sum(p["conf"] for p in ocr_pages) / len(ocr_pages), 1)
+                log.info("OCR recovered %d chars from %s (mean confidence %.1f%%)",
+                         len(text), filename, ocr_conf)
 
     if len(text) < 50:
         if not ocr_available():
@@ -1015,6 +1040,11 @@ def parse_ticket():
             # Platform detected but no booking ID/PNR found
             log.info("Platform %s detected but booking ID/PNR missing", extracted.get("booking_platform"))
     
+    if used_ocr:
+        # A scan is a best guess, not a statement of fact. Tell the front end
+        # so it can ask for a second look when the reading was poor.
+        extracted["used_ocr"] = True
+        extracted["ocr_confidence"] = ocr_conf
     extracted["raw_excerpt"] = text[:1200]
     if extracted.get("booking_platform"):
         log.info(

@@ -23,6 +23,16 @@ MONEY_RE = r"(?:INR|[$€£])?\s*(-?[\d,]+\.\d{2})"
 
 OCR_MAX_PAGES = 3
 OCR_DPI = 300
+OCR_MIN_DPI_UPSCALE = 1100   # page narrower than this in px gets enlarged
+OCR_RETRY_CONF = 72          # mean confidence below this earns a second pass
+OCR_MIN_WORDS = 25           # too few words also earns a second pass
+OCR_PAGE_TEXT_FLOOR = 120    # embedded chars that make a page worth keeping as-is
+OCR_BUDGET_SECONDS = 55      # upload requests must answer, so cap total OCR work
+
+# Page segmentation modes tried in order. 6 ("uniform block") reads ticket
+# tables far better than tesseract's default 3, which hunts for columns that
+# are not there and interleaves the itinerary with the fare box.
+OCR_PSM_ORDER = (6, 4, 3)
 
 
 def ocr_available():
@@ -37,32 +47,240 @@ def ocr_available():
         return False
 
 
-def ocr_pdf_bytes(data, max_pages=OCR_MAX_PAGES, dpi=OCR_DPI):
-    """Read a scanned PDF by rendering its pages and running OCR over them.
+def _ocr_deps():
+    import io
 
-    Returns "" when OCR is unavailable, so callers can fall back to telling the
-    user the file is a scan rather than failing outright. Only the first few
-    pages are read: tickets are one or two pages and OCR costs seconds each.
+    import pymupdf
+    import pytesseract
+    from PIL import Image, ImageOps
+
+    return io, pymupdf, pytesseract, Image, ImageOps
+
+
+def _prepare(image, ImageOps):
+    """Grayscale, normalise contrast and enlarge a small page.
+
+    Scans arrive faded, over-bright or rendered small; tesseract wants roughly
+    300 DPI of black text on white. autocontrast alone recovers most faded
+    faxes, and upscaling rescues a phone photo saved at screen resolution.
+    """
+    image = ImageOps.grayscale(image)
+    image = ImageOps.autocontrast(image, cutoff=1)
+    if image.width < OCR_MIN_DPI_UPSCALE:
+        from PIL import Image as _I
+
+        scale = OCR_MIN_DPI_UPSCALE / float(image.width)
+        image = image.resize((int(image.width * scale), int(image.height * scale)),
+                             _I.LANCZOS)
+    return image
+
+
+def _orient(image, pytesseract):
+    """Rotate a sideways or upside-down scan upright using tesseract's OSD.
+
+    A page fed in at 90 degrees OCRs to noise, so this is the difference
+    between reading the ticket and rejecting it.
     """
     try:
-        import io
+        osd = pytesseract.image_to_osd(image, config="--psm 0")
+    except Exception:
+        return image
+    match = re.search(r"Rotate:\s*(\d+)", osd)
+    if not match:
+        return image
+    degrees = int(match.group(1)) % 360
+    if degrees:
+        image = image.rotate(-degrees, expand=True, fillcolor=255)
+    return image
 
-        import pymupdf
-        import pytesseract
-        from PIL import Image
+
+def _deskew(image):
+    """Straighten a page scanned a couple of degrees off square.
+
+    Rows of a table stop lining up once the page tilts, and the column parser
+    reads coordinates, so a small rotation matters more here than it would for
+    plain text. The angle chosen is the one whose horizontal projection has the
+    sharpest peaks - text rows are darkest when they are level. Resizing to a
+    single column makes PIL compute each row's mean in C, which keeps the
+    search to a few milliseconds instead of a per-pixel loop in Python.
+    """
+    try:
+        from PIL import Image as _I
     except ImportError:
-        return ""
+        return image
+    small = image.resize((max(image.width // 4, 1), max(image.height // 4, 1)), _I.BILINEAR)
+    best_angle, best_score = 0.0, None
+    for tenths in range(-30, 31, 5):
+        angle = tenths / 10.0
+        test = small.rotate(angle, expand=False, fillcolor=255) if angle else small
+        profile = list(test.resize((1, test.height), _I.BILINEAR).getdata())
+        score = sum((profile[i + 1] - profile[i]) ** 2 for i in range(len(profile) - 1))
+        if best_score is None or score > best_score:
+            best_angle, best_score = angle, score
+    # Below half a degree the rotation costs more in resampling blur than it
+    # recovers in alignment.
+    if abs(best_angle) >= 0.5:
+        image = image.rotate(best_angle, expand=True, fillcolor=255)
+    return image
 
+
+# Tesseract reads these interchangeably in short uppercase codes, where there
+# is no surrounding word for its language model to lean on.
+_CONFUSIONS = str.maketrans({"O": "0", "D": "0", "I": "1", "L": "1",
+                             "S": "5", "B": "8", "Z": "2", "G": "6"})
+_UNCONFUSE = str.maketrans({"0": "O", "1": "I", "5": "S", "8": "B"})
+
+
+def _fix_codes(text, is_airport=None, is_airline=None):
+    """Repair OCR confusions inside airport, flight and PNR codes.
+
+    Only tokens that sit where a code belongs are touched, so ordinary words
+    and real numbers are left alone.
+    """
+    def flight(match):
+        carrier, number = match.group(1), match.group(2)
+        fixed_carrier = carrier.translate(_UNCONFUSE)
+        if is_airline and not is_airline(carrier) and is_airline(fixed_carrier):
+            carrier = fixed_carrier
+        return carrier + number.translate(_CONFUSIONS)
+
+    text = re.sub(r"\b([A-Z0-9]{2})[ -]?(\d[A-Z0-9]{1,4})\b", flight, text)
+
+    def airport(match):
+        code = match.group(1)
+        fixed = code.translate(_UNCONFUSE)
+        if is_airport and not is_airport(code) and is_airport(fixed):
+            return "(" + fixed + ")"
+        return match.group(0)
+
+    return re.sub(r"\(([A-Z0-9]{3})\)", airport, text)
+
+
+def _words_from_data(data, scale):
+    """Turn tesseract's TSV rows into pdfplumber-shaped word boxes.
+
+    The columnar parser works in PDF points off x0/top, so pixel coordinates
+    are divided back down by the render scale.
+    """
+    words = []
+    for i, text in enumerate(data.get("text", [])):
+        text = (text or "").strip()
+        if not text:
+            continue
+        try:
+            conf = float(data["conf"][i])
+        except (KeyError, ValueError, IndexError):
+            conf = -1.0
+        if conf < 0:
+            continue
+        left, top = data["left"][i] / scale, data["top"][i] / scale
+        words.append({
+            "text": text,
+            "x0": left,
+            "x1": left + data["width"][i] / scale,
+            "top": top,
+            "bottom": top + data["height"][i] / scale,
+            "conf": conf,
+        })
+    return words
+
+
+def _text_from_data(data):
+    """Rebuild text the way tesseract itself would lay it out.
+
+    Grouping by the block, paragraph and line numbers tesseract reports keeps
+    each labelled box on its own line. Joining words purely by vertical
+    position instead would run a label in one column into an unrelated value
+    in the next, which is enough to stop "PNR: ..." matching at all.
+    """
+    lines, order = {}, []
+    for i, text in enumerate(data.get("text", [])):
+        text = (text or "").strip()
+        if not text:
+            continue
+        try:
+            if float(data["conf"][i]) < 0:
+                continue
+        except (KeyError, ValueError, IndexError):
+            continue
+        key = (data["block_num"][i], data["par_num"][i], data["line_num"][i])
+        if key not in lines:
+            lines[key] = []
+            order.append(key)
+        lines[key].append(text)
+    return "\n".join(" ".join(lines[k]) for k in order).strip()
+
+
+def _mean_conf(words):
+    scored = [w["conf"] for w in words if w["conf"] >= 0]
+    return sum(scored) / len(scored) if scored else 0.0
+
+
+def ocr_pdf_pages(data, max_pages=OCR_MAX_PAGES, dpi=OCR_DPI,
+                  is_airport=None, is_airline=None, only_pages=None):
+    """OCR a scanned PDF into per-page text *and* word boxes.
+
+    Word boxes matter as much as the text: the columnar agency layout is only
+    readable as coordinates, so without them a scan of that ticket parses to
+    nothing even when every character is recognised. Returns a list of
+    {"text", "words", "conf"} dicts, empty when OCR is unavailable. Pages are
+    indexed from zero; `only_pages` restricts the work to the pages a caller
+    could not read itself, so a mostly digital document is not re-recognised
+    from scratch.
+    """
+    try:
+        io, pymupdf, pytesseract, Image, ImageOps = _ocr_deps()
+    except ImportError:
+        return []
+
+    import time
+
+    scale = dpi / 72.0
+    deadline = time.monotonic() + OCR_BUDGET_SECONDS
+    pages = []
     try:
         with pymupdf.open(stream=data, filetype="pdf") as document:
-            pages = []
-            for page in list(document)[:max_pages]:
+            for index, page in enumerate(list(document)[:max_pages]):
+                if only_pages is not None and index not in only_pages:
+                    continue
+                # Return what has been read rather than let a long document
+                # hold the request open past the proxy's patience.
+                if time.monotonic() > deadline and pages:
+                    break
                 pixmap = page.get_pixmap(dpi=dpi)
                 image = Image.open(io.BytesIO(pixmap.tobytes("png")))
-                pages.append(pytesseract.image_to_string(image))
-        return "\n".join(pages).strip()
+                image = _prepare(image, ImageOps)
+                image = _orient(image, pytesseract)
+                image = _deskew(image)
+                page_scale = scale * (image.width / float(pixmap.width or image.width))
+
+                best = None
+                for psm in OCR_PSM_ORDER:
+                    try:
+                        tsv = pytesseract.image_to_data(
+                            image, config=f"--psm {psm} --oem 1",
+                            output_type=pytesseract.Output.DICT)
+                    except Exception:
+                        continue
+                    words = _words_from_data(tsv, page_scale)
+                    conf = _mean_conf(words)
+                    if best is None or (len(words), conf) > (len(best[0]), best[1]):
+                        best = (words, conf, tsv)
+                    # A confident, populated read is not improved by trying the
+                    # next mode, and each pass costs seconds.
+                    if conf >= OCR_RETRY_CONF and len(words) >= OCR_MIN_WORDS:
+                        break
+                    if time.monotonic() > deadline:
+                        break
+                if best is None:
+                    continue
+                words, conf, tsv = best
+                text = _fix_codes(_text_from_data(tsv), is_airport, is_airline)
+                pages.append({"index": index, "text": text,
+                              "words": words, "conf": conf})
     except Exception:
-        return ""
+        return pages
+    return pages
 
 
 def normalize_text(text):
@@ -84,8 +302,25 @@ def normalize_text(text):
     return text
 
 
+# Structure of our own ticket, used when the wordmark itself is unreadable.
+OWN_SECTIONS = ("BOOKING SUMMARY", "FLIGHT DETAILS", "PASSENGER DETAILS",
+                "FARE DETAILS", "ITINERARY", "PASSENGERS")
+
+
 def looks_like_own_ticket(text_upper):
-    return "E-TICKET" in text_upper and any(b in text_upper for b in OWN_BRANDS)
+    """True for a ticket this app produced.
+
+    The agency name is the strong signal. The wordmark is drawn in a styled
+    face and a scan of it often comes back as gibberish, so an unreadable
+    "E-TICKET" falls back to the section headings the layout always prints -
+    otherwise every scanned copy of our own ticket is handed to the parsers
+    written for other people's formats.
+    """
+    if not any(brand in text_upper for brand in OWN_BRANDS):
+        return False
+    if any(word in text_upper for word in ("E-TICKET", "ETICKET", "E TICKET")):
+        return True
+    return sum(1 for heading in OWN_SECTIONS if heading in text_upper) >= 2
 
 
 def _to_iso(day, month_abbr, year):
@@ -206,6 +441,17 @@ def parse_stacked_itinerary(text, is_airport, is_airline):
     return flights
 
 
+def _strip_lead_noise(line):
+    """Drop a stray leading token left behind by OCR.
+
+    Logos, row numbers and table rules come through as a character or two in
+    front of the real content ("A QP1502 ...", "at Mr KARTIKEY ..."). Callers
+    only reach for this once an anchored match has already failed, so a line
+    that reads correctly is never re-interpreted.
+    """
+    return re.sub(r"^[A-Za-z0-9\u2022*.,:;|]{1,2}\s+(?=[A-Za-z0-9])", "", line, count=1)
+
+
 def parse_agency_ticket(text):
     """Parse an agency-issued ticket (not one of the big OTAs).
 
@@ -221,6 +467,12 @@ def parse_agency_ticket(text):
     flights = []
     for idx, line in enumerate(lines):
         match = AGENCY_FLIGHT_RE.match(line.upper())
+        if not match:
+            # OCR often prefixes a row with a stray character picked out of an
+            # airline logo ("A QP1502 ..."), which defeats an anchored match.
+            # Only retried once the line has already failed, so a row that
+            # parses normally can never be re-read a different way.
+            match = AGENCY_FLIGHT_RE.match(_strip_lead_noise(line).upper())
         if not match:
             continue
         segment = {
@@ -252,10 +504,19 @@ def parse_agency_ticket(text):
     else:
         # The value is printed above the label, often as the last token of an
         # unrelated address line, so scan backwards for a PNR-shaped token.
-        label = next((i for i, l in enumerate(lines) if l.upper().strip() in ("AIRLINE PNR", "PNR")), None)
-        if label:
+        # Match the label on its letters alone: a scan leaves specks and
+        # punctuation around it, so "ue Airline PNR :" must still count.
+        def _is_pnr_label(line):
+            letters = re.sub(r"[^A-Z]", "", line.upper())
+            return letters == "PNR" or letters.endswith("AIRLINEPNR")
+
+        label = next((i for i, l in enumerate(lines) if _is_pnr_label(l)), None)
+        if label is not None:
             for candidate in reversed(lines[max(0, label - 4):label]):
-                token = re.search(r"\b([A-Z][A-Z0-9]{4,7})\s*$", candidate.strip())
+                # Tolerate a stray character after the code, which OCR invents
+                # from the box rule beside it ("S6BKRC f").
+                token = re.search(r"\b([A-Z][A-Z0-9]{4,7})\b(?:\s+\S{1,2})?\s*$",
+                                  candidate.strip())
                 if token and re.search(r"\d", token.group(1)) and re.search(r"[A-Z]", token.group(1)):
                     result["pnr"] = token.group(1)
                     break
@@ -290,9 +551,14 @@ def parse_agency_ticket(text):
 
     seen = set()
     for line in lines:
-        match = re.match(
-            r"^(MR|MRS|MS|MSTR|DR|MISS)\.?\s+([A-Z][A-Za-z .'\-]{2,40}?)"
-            r"(?=\s+(?:ADULT|CHILD|INFANT)\b|\s*$)", line.strip(), re.I)
+        stripped = line.strip()
+        pax_re = (r"^(MR|MRS|MS|MSTR|DR|MISS)\.?\s+([A-Z][A-Za-z .'\-]{2,40}?)"
+                  r"(?=\s+(?:ADULT|CHILD|INFANT)\b|\s*$)")
+        match = re.match(pax_re, stripped, re.I)
+        if not match:
+            # A scan puts a row number or a fragment of the table rule in front
+            # of the title, which defeats an anchored match.
+            match = re.match(pax_re, _strip_lead_noise(stripped), re.I)
         if not match:
             continue
         name = re.sub(r"\s{2,}", " ", match.group(2)).strip().title()
@@ -373,16 +639,22 @@ def _parse_own_legacy(text):
 
     entries = []
     for idx, line in enumerate(flight_lines):
-        match = re.match(r"^([A-Z0-9]{2})\s+(\d{2,4})\b", line)
+        # OCR frequently closes the gap in "6E 5936", so the space is
+        # optional; the guards below still require a real flight cell.
+        match = re.match(r"^([A-Z0-9]{2})\s*(\d{2,4})\b", line)
         if not match:
             continue
         # A wrapped row repeats the airline code followed by the continuation
         # of the cell above - a time, or the year of the travel date. Neither
         # is a flight number, so require the row to carry a real flight cell
         # (an airport code or a departure time) before accepting it.
-        if re.match(r"^[A-Z0-9]{2}\s+\d{1,2}:\d{2}", line):
+        if re.match(r"^[A-Z0-9]{2}\s*\d{1,2}:\d{2}", line):
             continue
-        if not re.search(r"\([A-Z]{3}\)|\d{1,2}:[0-5]\d", line):
+        # The cell carrying the airport code or the time renders on the line
+        # above or below the flight number, and a scan does not always keep
+        # them together, so accept the evidence from the wrapped row too.
+        neighbourhood = "\n".join(flight_lines[max(0, idx - 2):idx + 3])
+        if not re.search(r"\([A-Z]{3}\)|\d{1,2}:[0-5]\d", neighbourhood):
             continue
         # The table wraps: the airport/date cell renders above the flight-number
         # row and the year below it, so look on both sides.

@@ -1055,6 +1055,15 @@ function applyExtractedData(data){
     }
 
     let status=`Filled ${flights.length||1} flight(s), ${pax.length||1} passenger(s). Review and adjust any missing fields.`;
+    if(data.used_ocr){
+        // Read from a scan rather than the PDF's own text, so it is a best
+        // guess: say how sure the reader was and push harder when it is low.
+        const c=data.ocr_confidence;
+        const shaky = typeof c==='number' && c < 80;
+        status += shaky
+            ? ` Read from a scan at ${c}% confidence \u2014 please check every field carefully.`
+            : ` Read from a scan${typeof c==='number'?` (${c}% confidence)`:''}. Please double-check the details.`;
+    }
     return status;
 }
 

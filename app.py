@@ -590,14 +590,43 @@ def extract_ticket_fields(text, filename="", pages_words=None):
         if match:
             booking_date = parse_date_str(match.group(1))
 
+    # The first address on a ticket is nearly always the issuer's support desk,
+    # so a mailbox that reads like one is skipped rather than handed back as
+    # the traveller's.
     emails = re.findall(r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", text_upper, flags=re.IGNORECASE)
-    customer_email = emails[0] if emails else ""
+    customer_email = ""
+    for candidate in emails:
+        local = candidate.split("@", 1)[0].lower()
+        if any(token in local for token in SUPPORT_MAILBOXES):
+            continue
+        customer_email = candidate
+        break
 
+    # Any run of ten-plus digits used to qualify, so booking references
+    # (260427555096) and issuer helplines (0124-4628747) were handed back as
+    # the customer's number. Accept only a shape a mobile actually takes.
     phone = ""
-    phone_match = re.findall(r"\b\+?\d[\d\s\-]{8,}\d\b", text)
-    for candidate in phone_match:
+    reference_digits = {re.sub(r"\D", "", value) for value in (booking_id, pnr) if value}
+    reference_digits.discard("")
+    for match in re.finditer(r"\+?\d[\d\s\-]{8,}\d", text):
+        candidate = match.group(0)
+        if ":" in candidate:
+            continue
+        # An issuer's helpline has the same shape as a mobile, so the words
+        # introducing it are what tell them apart.
+        lead = text[max(0, match.start() - 60):match.start()].upper()
+        if any(word in lead for word in HELPLINE_LEAD_INS):
+            continue
         digits = re.sub(r"\D", "", candidate)
-        if 10 <= len(digits) <= 13:
+        if any(digits == ref or (ref and ref in digits) for ref in reference_digits):
+            continue
+        plus = candidate.strip().startswith("+")
+        mobile = (
+            re.fullmatch(r"[6-9]\d{9}", digits)
+            or re.fullmatch(r"0[6-9]\d{9}", digits)
+            or re.fullmatch(r"91[6-9]\d{9}", digits)
+        )
+        if mobile or (plus and 10 <= len(digits) <= 15):
             phone = candidate.strip()
             break
 
@@ -1003,6 +1032,20 @@ def test_extract():
 
 
 MAX_BARCODE_BYTES = 4 * 1024 * 1024
+
+# Mailboxes that belong to whoever issued the ticket, not to the traveller.
+SUPPORT_MAILBOXES = (
+    "support", "care", "noreply", "no-reply", "donotreply", "do-not-reply",
+    "info", "contact", "help", "service", "booking", "feedback", "admin",
+    "sales", "enquiry", "inquiry", "customer",
+)
+
+# Wording that introduces the issuer's own number rather than the customer's.
+HELPLINE_LEAD_INS = (
+    "SUPPORT", "HELPLINE", "HELP LINE", "TOLL FREE", "TOLL-FREE", "CARE",
+    "CALL US", "CONTACT US", "REACH US", "CUSTOMER SERVICE", "ASSISTANCE",
+    "QUERIES", "24X7", "24/7", "HELPDESK",
+)
 
 TICKET_STATUSES = ("Confirmed", "On Hold", "Waitlisted", "Cancelled", "Refunded")
 # Printed on the ticket and recorded in the tracker, so the list is fixed here

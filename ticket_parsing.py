@@ -207,8 +207,99 @@ def _text_from_data(data):
         if key not in lines:
             lines[key] = []
             order.append(key)
-        lines[key].append(text)
-    return "\n".join(" ".join(lines[k]) for k in order).strip()
+        lines[key].append((text, data["left"][i], data["width"][i], data["height"][i]))
+
+    rendered = []
+    for key in order:
+        parts = []
+        previous = None
+        for text, left, width, height in lines[key]:
+            # OCR sometimes breaks one token into pieces ("S 6BKR C"), which
+            # hides a booking reference from every pattern looking for it. A
+            # real space is a sizeable fraction of the text height, so a gap
+            # far below that means the pieces were never separate words.
+            if previous is not None and left - previous <= 0.15 * height:
+                parts[-1] += text
+            else:
+                parts.append(text)
+            previous = left + width
+        rendered.append(" ".join(parts))
+    return "\n".join(rendered).strip()
+
+
+OCR_REFINE_CONF = 55     # below this a code-shaped word is read again, alone
+OCR_REFINE_MAX = 12      # cap the re-reads so a bad page cannot run away
+
+
+def _refine_codes(image, data, pytesseract):
+    """Read low-confidence reference codes again, one word at a time.
+
+    A booking reference has no surrounding language for tesseract to lean on,
+    so a smudged glyph becomes a plain substitution - "S6BKRC" read as
+    "SOBKRC" - and one wrong character makes the reference useless. Those
+    words are recognisable by their low confidence, and re-reading just that
+    box, enlarged and in single-word mode, usually settles it. The rest of the
+    page is left alone, so this costs a fraction of a second.
+    """
+    refined = 0
+    for i, text in enumerate(data.get("text", [])):
+        if refined >= OCR_REFINE_MAX:
+            break
+        text = (text or "").strip()
+        try:
+            conf = float(data["conf"][i])
+        except (KeyError, ValueError, IndexError):
+            continue
+        if conf < 0 or conf >= OCR_REFINE_CONF:
+            continue
+        # Code-shaped: upper case and unbroken. Requiring a digit would miss
+        # exactly the case this exists for, where the digit is what was misread
+        # ("S6BKRC" coming back as "SOBKRC"). Ordinary prose is left alone -
+        # the language model reads it better than a single-word pass can.
+        if not re.fullmatch(r"[A-Z0-9]{4,12}", text):
+            continue
+        best_text, best_conf = None, conf
+        # How much of the surrounding page to include matters more than it
+        # looks: too tight clips the glyphs, too loose drags in a neighbouring
+        # rule and tesseract then reports no confidence at all for a reading
+        # that is otherwise correct. Try both and keep the surest answer.
+        for margin in (0.2, 0.35):
+            pad = max(int(data["height"][i] * margin), 3)
+            left = max(data["left"][i] - pad, 0)
+            top = max(data["top"][i] - pad, 0)
+            right = min(data["left"][i] + data["width"][i] + pad, image.width)
+            bottom = min(data["top"][i] + data["height"][i] + pad, image.height)
+            if right - left < 8 or bottom - top < 8:
+                continue
+            try:
+                from PIL import Image as _I
+
+                crop = image.crop((left, top, right, bottom))
+                crop = crop.resize((crop.width * 3, crop.height * 3), _I.LANCZOS)
+                again = pytesseract.image_to_data(
+                    crop, output_type=pytesseract.Output.DICT,
+                    # Upper case only: allowing both cases makes tesseract
+                    # report a confidence of zero, so a correct re-read could
+                    # never be told from a wrong one.
+                    config="--psm 8 --oem 1 -c tessedit_char_whitelist="
+                           "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
+            except Exception:
+                continue
+            for j, candidate in enumerate(again.get("text", [])):
+                candidate = (candidate or "").strip()
+                if not candidate:
+                    continue
+                try:
+                    candidate_conf = float(again["conf"][j])
+                except (KeyError, ValueError, IndexError):
+                    continue
+                if candidate_conf > best_conf and len(candidate) == len(text):
+                    best_text, best_conf = candidate, candidate_conf
+        refined += 1
+        if best_text and best_text != text:
+            data["text"][i] = best_text
+            data["conf"][i] = best_conf
+    return data
 
 
 def _mean_conf(words):
@@ -275,6 +366,8 @@ def ocr_pdf_pages(data, max_pages=OCR_MAX_PAGES, dpi=OCR_DPI,
                 if best is None:
                     continue
                 words, conf, tsv = best
+                tsv = _refine_codes(image, tsv, pytesseract)
+                words = _words_from_data(tsv, page_scale)
                 text = _fix_codes(_text_from_data(tsv), is_airport, is_airline)
                 pages.append({"index": index, "text": text,
                               "words": words, "conf": conf})
@@ -316,11 +409,16 @@ def looks_like_own_ticket(text_upper):
     otherwise every scanned copy of our own ticket is handed to the parsers
     written for other people's formats.
     """
+    headings = sum(1 for heading in OWN_SECTIONS if heading in text_upper)
     if not any(brand in text_upper for brand in OWN_BRANDS):
-        return False
+        # A poor scan can lose the agency name as well as the wordmark. The
+        # layout still identifies itself: no other issuer in our samples prints
+        # a "BOOKING SUMMARY" block, let alone beside three more of our own
+        # headings.
+        return "BOOKING SUMMARY" in text_upper and headings >= 3
     if any(word in text_upper for word in ("E-TICKET", "ETICKET", "E TICKET")):
         return True
-    return sum(1 for heading in OWN_SECTIONS if heading in text_upper) >= 2
+    return headings >= 2
 
 
 def _to_iso(day, month_abbr, year):
@@ -507,21 +605,31 @@ def parse_agency_ticket(text):
         # Match the label on its letters alone: a scan leaves specks and
         # punctuation around it, so "ue Airline PNR :" must still count.
         def _is_pnr_label(line):
+            # Compare on letters alone, and only require the label to appear
+            # somewhere on the line: a scan drops specks either side of it, so
+            # demanding the line hold nothing else loses the label entirely.
             letters = re.sub(r"[^A-Z]", "", line.upper())
-            return letters == "PNR" or letters.endswith("AIRLINEPNR")
+            return letters == "PNR" or "AIRLINEPNR" in letters
 
         label = next((i for i, l in enumerate(lines) if _is_pnr_label(l)), None)
         if label is not None:
             for candidate in reversed(lines[max(0, label - 4):label]):
-                # Tolerate a stray character after the code, which OCR invents
-                # from the box rule beside it ("S6BKRC f").
-                token = re.search(r"\b([A-Z][A-Z0-9]{4,7})\b(?:\s+\S{1,2})?\s*$",
-                                  candidate.strip())
-                if token and re.search(r"\d", token.group(1)) and re.search(r"[A-Z]", token.group(1)):
-                    result["pnr"] = token.group(1)
+                # The value shares its line with whatever the scan made of the
+                # address behind it, so take the last code-shaped token rather
+                # than insisting the line ends with it.
+                tokens = re.findall(r"\b([A-Z][A-Z0-9]{4,7})\b", candidate)
+                tokens = [t for t in tokens if re.search(r"\d", t) and re.search(r"[A-Z]", t)]
+                if tokens:
+                    result["pnr"] = tokens[-1]
                     break
 
-    reference = re.search(r"REFERENCE\s*(?:NUMBER|NO)?\.?\s*[:\-]?\s*([A-Z0-9]{5,20})", upper)
+    # The separators around "Reference Number" vary, and OCR adds its own, so
+    # allow punctuation on either side of the word and never take the word
+    # itself as the reference.
+    reference = re.search(
+        r"REFERENCE\s*[.,:\-]?\s*(?:NUMBER|NO)?\s*[.,:\-]?\s*([A-Z0-9]{5,20})", upper)
+    if reference and reference.group(1) in ("NUMBER", "NO"):
+        reference = None
     if reference:
         result["booking_id"] = reference.group(1)
 
@@ -588,7 +696,11 @@ def _parse_own_legacy(text):
 
     # ── Booking summary: a header row followed by its values ──────────────
     for idx, line in enumerate(lines):
-        if "BOOKING ID" in line.upper() and "PNR" in line.upper() and idx + 1 < len(lines):
+        # "PNR" is three glyphs with no word around them, so OCR readily turns
+        # it into "PNA" or "PNB". The row must still name the booking ID, which
+        # keeps this from matching anything else.
+        if ("BOOKING ID" in line.upper() and re.search(r"\bPN[A-Z]\b", line.upper())
+                and idx + 1 < len(lines)):
             values = lines[idx + 1]
             match = re.match(r"^(\S+)\s+(.*?)\s+([A-Z0-9]{4,10})$", values)
             if match:
@@ -601,6 +713,26 @@ def _parse_own_legacy(text):
         pnr_match = re.search(r"\bPNR\s*/?\s*BOOKING\s*REF\b[^A-Z0-9]{0,10}([A-Z0-9]{4,10})", joined, re.I)
         if pnr_match:
             result["pnr"] = pnr_match.group(1)
+
+    if not result["pnr"] or not result["booking_id"]:
+        # A faint scan can lose the header row altogether, leaving the values
+        # directly under "BOOKING SUMMARY". Find that row by its shape - an
+        # identifier, a date, then the booking reference - rather than by the
+        # labels that were supposed to sit above it.
+        anchor = next((i for i, l in enumerate(lines) if "BOOKING SUMMARY" in l.upper()), None)
+        if anchor is not None:
+            for candidate in lines[anchor + 1:anchor + 5]:
+                shape = re.match(r"^([A-Z0-9]{6,25})\s+(.*\b\d{4})\s+([A-Z0-9]{5,8})$",
+                                 candidate.strip(), re.I)
+                if not shape:
+                    continue
+                date = _find_date(shape.group(2))
+                if not date:
+                    continue
+                result["booking_id"] = result["booking_id"] or shape.group(1)
+                result["booking_date"] = result["booking_date"] or date
+                result["pnr"] = result["pnr"] or shape.group(3)
+                break
 
     emails = re.findall(r"[\w.%+-]+@[\w.-]+\.[A-Za-z]{2,}", joined)
     # The agency's own address appears in the header; the customer's is on the
@@ -667,6 +799,14 @@ def _parse_own_legacy(text):
             "date": _find_date(window, fallback_year),
         })
 
+    if not entries and sectors:
+        # A poor scan can lose the flight-number row entirely while the sector
+        # list survives further down the page. The route is the part the user
+        # most needs filled in, so take it from there and leave the rest blank
+        # rather than report no itinerary at all.
+        entries = [{"flight_no": "", "dep_time_raw": "", "arr_time_raw": "",
+                    "date": _find_date(flight_text, fallback_year)} for _ in sectors]
+
     for idx, entry in enumerate(entries):
         if idx < len(sectors):
             entry["from_code"], entry["to_code"] = sectors[idx]
@@ -692,8 +832,12 @@ def _parse_own_legacy(text):
             continue
         name = re.sub(r"\s{2,}", " ", match.group(3)).strip()
         words = [w for w in name.split() if w]
-        # Require a plausible human name, not a stray table fragment.
+        # Require a plausible human name, not a stray table fragment. A row of
+        # two-letter specks ("ee ee ce ee") is what a scan leaves where a rule
+        # crossed the page, so insist on at least one substantial word.
         if len(words) < 2 or any(w.upper() in NOISE for w in words):
+            continue
+        if not any(len(w) >= 3 for w in words):
             continue
         name = name.title()
         if name.upper() in seen:
@@ -1076,3 +1220,125 @@ def parse_columnar_ticket(pages_words):
         if passengers:
             result["passengers"] = passengers
     return result
+
+
+# Words that sit in a passenger row but are never part of a name.
+_NOT_NAME = {
+    "ADULT", "CHILD", "INFANT", "MALE", "FEMALE", "GENDER", "STATUS", "CONFIRMED",
+    "VEG", "NONVEG", "MEAL", "MEALS", "SEAT", "KG", "PIECE", "PIECES", "BAGGAGE",
+    "HAND", "CHECKIN", "CHECK", "ONWARD", "RETURN", "NOT", "SELECTED", "NA",
+    "PASSENGER", "PASSENGERS", "DETAILS", "TICKET", "NO", "SR", "TYPE", "PNR",
+    "SECTOR", "FARE", "TOTAL", "AMOUNT", "INR", "YES", "CANCELLED", "WHEELCHAIR",
+}
+_TITLES = {"MR", "MRS", "MS", "MSTR", "MASTER", "DR", "MISS"}
+
+
+def ocr_passenger_names(pages_words):
+    """Read passenger names out of a scanned table using the word geometry.
+
+    OCR damages the edges of a name cell more than the name itself: it invents
+    a token from the rule beside it ("Harijan HSER |"), mangles the word that
+    should end the row ("adult" -> "adutt"), or drops the separator a text
+    pattern was relying on. Matching on where the words sit avoids all of it -
+    the gap between two columns is several times wider than the space between
+    two words, so the name is the run of words that stays close to its title.
+    """
+    names = []
+    seen = set()
+    for words in pages_words or []:
+        lines = _group_word_lines(words, tolerance=3.0)
+        texts = [" ".join(w["text"] for w in line).upper() for _top, line in lines]
+        # Confine the search to the passenger table. The notes further down the
+        # page are prose, and a sentence opening with a title word otherwise
+        # reads as a passenger.
+        start = next((i for i, t in enumerate(texts)
+                      if any(word in t for word in ("PASSENGER", "TRAVELLER", "TRAVELER",
+                                                    "GUEST", "PAX"))), None)
+        if start is None:
+            continue
+        # Start looking for the end of the table a couple of lines in: the row
+        # right under the header is the first passenger, and a stop word
+        # landing there would close the section before reading anyone.
+        stop = next((i for i, t in enumerate(texts[start + 2:], start + 2)
+                     if any(end in t for end in ("FARE DETAILS", "PAYMENT DETAILS",
+                                                 "ADDITIONAL INFORMATION", "TRAVEL CHECKLIST",
+                                                 "TERMS", "IMPORTANT"))), len(lines))
+        window = lines[start:stop]
+        for line_index, (_top, line) in enumerate(window):
+            for i, word in enumerate(line):
+                token = re.sub(r"[^A-Za-z]", "", word["text"]).upper()
+                if token not in _TITLES or word["bottom"] - word["top"] < 3.0:
+                    continue
+                height = max(word["bottom"] - word["top"], 1.0)
+                parts, previous, column_right = [], word, None
+                for nxt in line[i + 1:]:
+                    # Scanning throws off specks - a stray comma or bracket a
+                    # couple of pixels tall - and OCR reports them as words
+                    # sitting inside the name. Stepping over them matters:
+                    # treating one as the end of the cell truncates the name to
+                    # its first word.
+                    if nxt["bottom"] - nxt["top"] < 0.5 * height:
+                        continue
+                    text = nxt["text"].strip(".,:;|()[]")
+                    if not text:
+                        continue
+                    # A space inside a cell is a fraction of the text height;
+                    # anything approaching the height itself is a column break.
+                    if nxt["x0"] - previous["x1"] > 1.5 * height:
+                        column_right = nxt["x0"]
+                        break
+                    if not re.fullmatch(r"[A-Za-z][A-Za-z.'\-]*", text) or len(text) < 2:
+                        column_right = nxt["x0"]
+                        break
+                    if text.upper() in _NOT_NAME:
+                        column_right = nxt["x0"]
+                        break
+                    parts.append(text)
+                    previous = nxt
+                    if len(parts) >= 5:
+                        break
+                # A long name wraps inside its cell, so the rest of it sits on
+                # the next line under the same column. Take only words that
+                # start within that column's span.
+                # Only a name cut off after its first word is worth chasing onto
+                # the next line. Anything longer already reads as a full name,
+                # and continuing it is how a city from the row below ends up
+                # welded to a passenger.
+                if len(parts) == 1:
+                    # The cell runs to wherever the next column starts, not to
+                    # the end of the longest word above, or the tail of a
+                    # wrapped name is read as belonging to the column beside it.
+                    left_edge = word["x0"]
+                    right_edge = (column_right - 2 if column_right is not None
+                                  else previous["x1"] + 3 * height)
+                    # Scanning drops a line of specks between the two halves of
+                    # a wrapped cell, so look past a line that yields nothing.
+                    for next_top, following in window[line_index + 1:line_index + 3]:
+                        # The rest of a wrapped cell sits directly underneath;
+                        # a line further down belongs to another row.
+                        if next_top - _top > 2.5 * height:
+                            break
+                        taken = 0
+                        for nxt in following:
+                            if nxt["x0"] < left_edge - 2 or nxt["x0"] > right_edge:
+                                continue
+                            if nxt["bottom"] - nxt["top"] < 0.5 * height:
+                                continue
+                            text = nxt["text"].strip(".,:;|()[]")
+                            if (not re.fullmatch(r"[A-Za-z][A-Za-z.'\-]*", text)
+                                    or len(text) < 2 or text.upper() in _NOT_NAME):
+                                break
+                            parts.append(text)
+                            taken += 1
+                            if len(parts) >= 5:
+                                break
+                        if taken:
+                            break
+
+                if len(parts) >= 2:
+                    name = " ".join(parts).title()
+                    if name.upper() not in seen:
+                        seen.add(name.upper())
+                        names.append({"name": name, "title": word["text"].strip(".").title()})
+                break
+    return names

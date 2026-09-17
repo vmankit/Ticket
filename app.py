@@ -50,6 +50,7 @@ from ticket_parsing import (
     ocr_available,
     ocr_pdf_pages,
     parse_agency_ticket,
+    ocr_passenger_names,
     parse_columnar_ticket,
     parse_own_ticket,
     parse_stacked_itinerary,
@@ -431,6 +432,33 @@ def detect_platform(text_upper, filename=""):
 
 
 def extract_ticket_fields(text, filename="", pages_words=None):
+    """Read a ticket, repairing scanned passenger names from the word layout."""
+    result = _extract_ticket_fields(text, filename=filename, pages_words=pages_words)
+
+    # Only OCR supplies a per-word confidence, so this is how a recognised page
+    # is told from a digital one. A name cell is the part of a scanned row that
+    # the text patterns lose first, and the word positions still hold it.
+    from_ocr = any(word.get("conf") is not None
+                   for page in (pages_words or []) for word in page[:1])
+    if result and from_ocr:
+        try:
+            geometric = ocr_passenger_names(pages_words)
+        except Exception:
+            log.exception("Geometric passenger read failed; keeping the text result.")
+            geometric = []
+        if geometric:
+            existing = result.get("passengers") or []
+            for index, person in enumerate(geometric):
+                if index < len(existing):
+                    # Keep whatever else the row yielded (seat, meal, baggage).
+                    existing[index]["name"] = person["name"]
+                else:
+                    existing.append(person)
+            result["passengers"] = existing
+    return result
+
+
+def _extract_ticket_fields(text, filename="", pages_words=None):
     # Typographic dashes and currency signs are common in issuer PDFs and stop
     # every ASCII pattern below from matching.
     text = normalize_text(text or "")

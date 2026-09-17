@@ -33,6 +33,13 @@ following all still parse:
 * a document where only some pages are images - the pages that carry real
   text keep it, and only the scanned ones are recognised
 
+Measured on simulated scans of real tickets, the reader recovers every
+booking reference, route and passenger name from a clean, faded, noisy,
+rotated, tilted or low-resolution scan. Accuracy falls on heavily blurred or
+badly under-lit photographs, where the glyphs themselves are destroyed and no
+amount of parsing recovers them - a booking reference read as "XBCOWA"
+instead of "XBC9WA" looks perfectly plausible and is wrong.
+
 The reader reports how confident it was. Below 80% the upload message asks
 you to check every field, because a scan is a best guess rather than the
 figures the PDF itself states. Always review a scanned import before

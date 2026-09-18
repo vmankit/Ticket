@@ -308,7 +308,8 @@ def _mean_conf(words):
 
 
 def ocr_pdf_pages(data, max_pages=OCR_MAX_PAGES, dpi=OCR_DPI,
-                  is_airport=None, is_airline=None, only_pages=None):
+                  is_airport=None, is_airline=None, only_pages=None,
+                  psm_order=OCR_PSM_ORDER):
     """OCR a scanned PDF into per-page text *and* word boxes.
 
     Word boxes matter as much as the text: the columnar agency layout is only
@@ -317,7 +318,8 @@ def ocr_pdf_pages(data, max_pages=OCR_MAX_PAGES, dpi=OCR_DPI,
     {"text", "words", "conf"} dicts, empty when OCR is unavailable. Pages are
     indexed from zero; `only_pages` restricts the work to the pages a caller
     could not read itself, so a mostly digital document is not re-recognised
-    from scratch.
+    from scratch. `psm_order` overrides the segmentation modes, which lets a
+    caller ask for a second opinion when the first reading came up short.
     """
     try:
         io, pymupdf, pytesseract, Image, ImageOps = _ocr_deps()
@@ -346,7 +348,7 @@ def ocr_pdf_pages(data, max_pages=OCR_MAX_PAGES, dpi=OCR_DPI,
                 page_scale = scale * (image.width / float(pixmap.width or image.width))
 
                 best = None
-                for psm in OCR_PSM_ORDER:
+                for psm in psm_order:
                     try:
                         tsv = pytesseract.image_to_data(
                             image, config=f"--psm {psm} --oem 1",

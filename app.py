@@ -431,6 +431,55 @@ def detect_platform(text_upper, filename=""):
     return ""
 
 
+# Tesseract's page-segmentation modes disagree about what a ticket is. The
+# "uniform block" mode this reads with first keeps table columns together,
+# which is what the itinerary needs, but it will merge away a name sitting on
+# its own in a card - and the default mode, which finds that name, scrambles
+# the tables. Neither is right everywhere, so a reading that came up short is
+# given a second opinion and only the gaps are filled in.
+SECOND_OPINION_PSM = (3,)
+
+def _second_opinion(data, extracted, filename):
+    """Fill fields a scan did not yield by reading it again, segmented differently.
+
+    This costs another OCR pass, so it only runs when something important is
+    actually missing: a clean scan answers on the first reading and never pays
+    for this.
+    """
+    missing = [key for key in ("pnr", "booking_id") if not extracted.get(key)]
+    if not extracted.get("passengers"):
+        missing.append("passengers")
+    if not extracted.get("flights"):
+        missing.append("flights")
+    if not missing:
+        return extracted
+
+    log.info("First reading of %s left %s empty - trying another segmentation.",
+             filename, ", ".join(missing))
+    try:
+        pages = ocr_pdf_pages(
+            data, is_airport=is_valid_airport_code,
+            is_airline=lambda code: code in airline_payload(),
+            psm_order=SECOND_OPINION_PSM)
+    except Exception:
+        log.exception("Second reading failed; keeping the first.")
+        return extracted
+    if not pages:
+        return extracted
+
+    second = extract_ticket_fields(
+        "\n".join(page["text"] for page in pages), filename=filename,
+        pages_words=[page["words"] for page in pages])
+    filled = []
+    for key in missing:
+        if second.get(key) and not extracted.get(key):
+            extracted[key] = second[key]
+            filled.append(key)
+    if filled:
+        log.info("Second reading of %s recovered %s.", filename, ", ".join(filled))
+    return extracted
+
+
 def extract_ticket_fields(text, filename="", pages_words=None):
     """Read a ticket, repairing scanned passenger names from the word layout."""
     result = _extract_ticket_fields(text, filename=filename, pages_words=pages_words)
@@ -1045,7 +1094,10 @@ def parse_ticket():
     log.info("Processing %s - %d chars%s", filename, len(text), " via OCR" if used_ocr else "")
 
     extracted = extract_ticket_fields(text, filename=filename, pages_words=pages_words)
-    
+
+    if used_ocr:
+        extracted = _second_opinion(data, extracted, filename)
+
     if not extracted.get("pnr") and not extracted.get("booking_id") and not extracted.get("flights"):
         if not extracted.get("booking_platform"):
             # Distinguish "this isn't a ticket" from "it is, but unreadable" —

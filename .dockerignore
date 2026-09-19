@@ -30,3 +30,6 @@ airport-codes.csv
 _debug_*.txt
 check_pdf.py
 parse_local_pdf.py
+
+# Vercel's manifest; Render builds from the Dockerfile and never reads it.
+vercel.json

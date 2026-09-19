@@ -278,6 +278,31 @@ tracker stays a spreadsheet beside the code.
 
 ---
 
+## ▲ Deploying to Vercel
+
+`vercel.json` routes every path to `api/index.py`, which puts the repository
+root on the import path and re-exports the same Flask app. Import the repo,
+pick the **Flask** preset, and deploy.
+
+Set `DATABASE_URL` in the project's environment variables, exactly as on
+Render. It matters more here, not less: a serverless function's filesystem is
+read-only apart from `/tmp`, and `/tmp` is gone when the instance is recycled,
+so without a database the tracker keeps nothing at all. `vercel.json` points
+`DATA_DIR` at `/tmp/ticket-data` so the spreadsheet fallback can still write
+rather than erroring, but those rows do not outlive the instance.
+
+**Scanned-ticket OCR does not work on Vercel.** It needs the `tesseract`
+binary, which the Dockerfile installs and pip cannot. Vercel does not build
+from a Dockerfile, so uploads of scans and photographs fall back to manual
+entry there. `GET /api/health` reports `"ocr": false`, and digital PDFs still
+parse normally. Render is the deployment that has it.
+
+`render.yaml`, `Dockerfile` and `Procfile` are ignored by Vercel, and
+`vercel.json` and `api/` are ignored by Render, so both can be deployed from
+the same branch.
+
+---
+
 ## 🌐 Production Deployment
 
 When deploying to production:

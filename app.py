@@ -1704,7 +1704,11 @@ ERROR_PAGE = """<!DOCTYPE html>
 
 def _error_response(status, title, message):
     if request.path.startswith("/api/") or request.is_json:
-        return jsonify({"error": title, "message": message}), status
+        # Name the path. A host that rewrites requests can hand the app a path
+        # the visitor never asked for, and a 404 that does not say which path
+        # was not found gives no way to tell that apart from a real one.
+        return jsonify({"error": title, "message": message,
+                        "path": request.path}), status
     return render_template_string(ERROR_PAGE, status=status, title=title, message=message), status
 
 

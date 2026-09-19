@@ -12,3 +12,9 @@ gunicorn
 pytesseract
 PyMuPDF
 airportsdata
+
+# Postgres-backed booking tracker. Without DATABASE_URL the app never imports
+# these and records to the spreadsheet instead, so they are only needed on a
+# host whose filesystem does not survive a restart.
+psycopg[binary]
+psycopg-pool

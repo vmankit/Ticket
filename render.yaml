@@ -27,6 +27,12 @@ services:
         # Generated once by Render and kept across deploys; the app refuses to
         # boot in production without it.
         generateValue: true
+      - key: DATABASE_URL
+        # A free instance keeps nothing on disk, so the booking tracker and the
+        # ID counter live in Postgres instead. Paste the connection string from
+        # a free Neon or Supabase database here in the Render dashboard; unset,
+        # the app falls back to the spreadsheet and loses both on every deploy.
+        sync: false
       - key: FLASK_ENV
         value: production
       - key: PYTHONUNBUFFERED

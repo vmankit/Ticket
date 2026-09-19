@@ -30,7 +30,7 @@ except ImportError:
 
 # ─── Import comprehensive airport DB from CSV extraction ────────────
 from airports_data import AIRPORTS_DB
-from excel_tracker import get_next_booking_id, save_to_excel
+from booking_store import backend as booking_backend, get_next_booking_id, save_booking
 from utils import generate_qr
 from ticket_pdf import (
     ITINERARY_BASE_MM,
@@ -997,13 +997,16 @@ def get_airlines():
 
 @app.route("/api/health", methods=["GET"])
 def health():
-    """Surface optional-feature availability, so a missing tesseract binary on
-    the server can be spotted without uploading a scan to find out."""
+    """Surface optional-feature availability, so a missing tesseract binary or
+    an unreachable database can be spotted without issuing a ticket to find
+    out. "store": "spreadsheet" on a host without a disk means recorded
+    bookings will not survive the next deploy."""
     return jsonify({
         "status": "ok",
         "airports": len(AIRPORTS_DB),
         "airlines": len(airline_payload()),
         "ocr": ocr_available(),
+        "store": booking_backend(),
     })
 
 
@@ -1645,9 +1648,9 @@ def generate_ticket():
     ]
     if not is_dummy:
         try:
-            save_to_excel(excel_data)
+            save_booking(excel_data)
         except Exception as e:
-            log.error("Error saving to Excel: %s", e)
+            log.error("Error recording the booking: %s", e)
 
     cleanup_temp_files(flights)
 

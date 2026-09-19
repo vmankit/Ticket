@@ -997,13 +997,17 @@ function applyExtractedData(data){
     const base=parseFloat(data.base_fare||'');
     const taxes=parseFloat(data.taxes_fees||'');
     const total=parseFloat(data.total_fare||'');
+    const disc=parseFloat(data.discount||'');
     if(!isNaN(base))document.getElementById('baseFare').value=base;
     if(!isNaN(taxes))document.getElementById('taxesFees').value=taxes;
+    // Without the discount the recalculated total comes out higher than the
+    // ticket being copied, so carry it across whenever the upload reports one.
+    if(!isNaN(disc))document.getElementById('discount').value=disc;
     if(isNaN(base)&&isNaN(taxes)&&!isNaN(total)){
         document.getElementById('baseFare').value=total;
         document.getElementById('taxesFees').value=0;
     }
-    if(!isNaN(base)||!isNaN(taxes)||!isNaN(total))calcTotal();
+    if(!isNaN(base)||!isNaN(taxes)||!isNaN(total)||!isNaN(disc))calcTotal();
 
     const flights=Array.isArray(data.flights)?data.flights:[];
     resetFlights(flights.length||1);

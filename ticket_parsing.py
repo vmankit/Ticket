@@ -21,6 +21,20 @@ TIME_RE = re.compile(r"\b(\d{1,2}):([0-5]\d)\s*([AP]M)\b", re.IGNORECASE)
 MONEY_RE = r"(?:INR|[$€£])?\s*(-?[\d,]+\.\d{2})"
 
 
+def _money(raw, key):
+    """Normalise a MONEY_RE capture for storage.
+
+    A fare breakdown prints a discount as a negative ("Discount INR -5,500.00")
+    because it is subtracted from the line above. The form field it feeds is
+    unsigned and /generate subtracts it again, so the sign is dropped here to
+    keep the discount from being added back to the total.
+    """
+    value = raw.replace(",", "")
+    if key == "discount":
+        value = value.lstrip("-")
+    return value
+
+
 OCR_MAX_PAGES = 3
 OCR_DPI = 300
 OCR_MIN_DPI_UPSCALE = 1100   # page narrower than this in px gets enlarged
@@ -594,7 +608,7 @@ def parse_agency_ticket(text):
     result = {
         "booking_platform": "", "pnr": "", "booking_id": "", "booking_date": "",
         "customer_email": "", "customer_phone": "", "base_fare": "", "taxes_fees": "",
-        "total_fare": "", "flights": flights, "passengers": [],
+        "total_fare": "", "discount": "", "flights": flights, "passengers": [],
     }
 
     # The airline PNR is often printed above its own label rather than after it.
@@ -654,10 +668,11 @@ def parse_agency_ticket(text):
         ("base_fare", r"BASE\s*FARE\s*" + MONEY_RE),
         ("taxes_fees", r"TAX(?:ES)?(?:\s*(?:AND|&)\s*FEES)?\s*" + MONEY_RE),
         ("total_fare", r"(?:GROSS\s*FARE|TOTAL(?:\s*(?:FARE|AMOUNT))?)\s*" + MONEY_RE),
+        ("discount", r"DISCOUNT\s*" + MONEY_RE),
     ):
         match = re.search(pattern, upper)
         if match:
-            result[key] = match.group(1).replace(",", "")
+            result[key] = _money(match.group(1), key)
 
     seen = set()
     for line in lines:
@@ -693,7 +708,7 @@ def _parse_own_legacy(text):
     result = {
         "booking_platform": "", "pnr": "", "booking_id": "", "booking_date": "",
         "customer_email": "", "customer_phone": "", "base_fare": "", "taxes_fees": "",
-        "total_fare": "", "flights": [], "passengers": [],
+        "total_fare": "", "discount": "", "flights": [], "passengers": [],
     }
 
     # ── Booking summary: a header row followed by its values ──────────────
@@ -752,10 +767,11 @@ def _parse_own_legacy(text):
         ("total_fare", r"Total Amount\s+" + MONEY_RE),
         # Label and amount are set at the same size, so they extract as one line.
         ("total_fare", r"AMOUNT\s*PAID\s+" + MONEY_RE),
+        ("discount", r"Discount\s+" + MONEY_RE),
     ):
         match = re.search(pattern, joined, re.I)
         if match:
-            result[key] = match.group(1).replace(",", "")
+            result[key] = _money(match.group(1), key)
 
     # ── Flights ───────────────────────────────────────────────────────────
     flight_lines = _section(lines, "FLIGHT DETAILS", "PASSENGER DETAILS", "FARE DETAILS")
@@ -882,7 +898,7 @@ def _parse_own_current(text):
     result = {
         "booking_platform": "", "pnr": "", "booking_id": "", "booking_date": "",
         "customer_email": "", "customer_phone": "", "base_fare": "", "taxes_fees": "",
-        "total_fare": "", "flights": [], "passengers": [],
+        "total_fare": "", "discount": "", "flights": [], "passengers": [],
     }
 
     # ── Header: "... PNR" then "AT 8B6E58" on the line below ─────────────
@@ -914,10 +930,11 @@ def _parse_own_current(text):
         ("total_fare", r"Total Amount\s+" + MONEY_RE),
         # Label and amount are set at the same size, so they extract as one line.
         ("total_fare", r"AMOUNT\s*PAID\s+" + MONEY_RE),
+        ("discount", r"Discount\s+" + MONEY_RE),
     ):
         match = re.search(pattern, joined, re.I)
         if match:
-            result[key] = match.group(1).replace(",", "")
+            result[key] = _money(match.group(1), key)
 
     # Tickets issued before the amount was brought down to the label's size set
     # it much larger, so the two landed on separate lines. Look on either side.

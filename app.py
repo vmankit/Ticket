@@ -560,6 +560,7 @@ def _extract_ticket_fields(text, filename="", pages_words=None):
             "base_fare": "",
             "taxes_fees": "",
             "total_fare": "",
+            "discount": "",
             "flights": [],
             "passengers": [],
         }
@@ -722,6 +723,14 @@ def _extract_ticket_fields(text, filename="", pages_words=None):
     tax_match = re.search(r"\b(TAX|TAXES|FEES|TAXES AND FEES)\b[^0-9]{0,12}([0-9,]+(?:\.\d{1,2})?)", text_upper)
     if tax_match:
         taxes_fees = tax_match.group(2).replace(",", "")
+
+    # A discount prints as a negative because it is subtracted from the line
+    # above it. The form field is unsigned and /generate subtracts it again, so
+    # the sign is dropped to keep it from being added back to the total.
+    discount = ""
+    discount_match = re.search(r"\bDISCOUNT\b[^0-9-]{0,12}(-?[0-9,]+(?:\.\d{1,2})?)", text_upper)
+    if discount_match:
+        discount = discount_match.group(1).replace(",", "").lstrip("-")
 
     passengers = []
     if platform or pnr or booking_id or ("TRAVELLER" in text_upper or "PASSENGER" in text_upper):
@@ -903,6 +912,7 @@ def _extract_ticket_fields(text, filename="", pages_words=None):
         "base_fare": base_fare,
         "taxes_fees": taxes_fees,
         "total_fare": total_fare,
+        "discount": discount,
         "flights": segments,
         "passengers": passengers,
     }

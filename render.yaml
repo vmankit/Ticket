@@ -1,0 +1,39 @@
+# Render blueprint. Docker rather than the native Python runtime because
+# scanned-ticket OCR needs the tesseract binary, which pip cannot install.
+services:
+  - type: web
+    name: bharat-horizon-eticket
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    # Free instances get no persistent disk and are stopped after a spell of
+    # inactivity, so the container - and everything written inside it - is
+    # rebuilt from the image. The booking tracker and the ID counter are the
+    # only state the app keeps, and both are lost each time that happens.
+    # Moving to the starter plan and restoring the disk block below is what
+    # makes them survive:
+    #
+    #   plan: starter
+    #   disk:
+    #     name: ticket-data
+    #     mountPath: /var/data
+    #     sizeGB: 1
+    #
+    # with DATA_DIR set back to /var/data in envVars.
+    plan: free
+    healthCheckPath: /api/health
+    autoDeployTrigger: commit
+    envVars:
+      - key: SECRET_KEY
+        # Generated once by Render and kept across deploys; the app refuses to
+        # boot in production without it.
+        generateValue: true
+      - key: DATABASE_URL
+        # A free instance keeps nothing on disk, so the booking tracker and the
+        # ID counter live in Postgres instead. Paste the connection string from
+        # a free Neon or Supabase database here in the Render dashboard; unset,
+        # the app falls back to the spreadsheet and loses both on every deploy.
+        sync: false
+      - key: FLASK_ENV
+        value: production
+      - key: PYTHONUNBUFFERED
+        value: "1"

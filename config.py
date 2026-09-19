@@ -1,10 +1,10 @@
 COMPANY = {
     "name": "BHARAT HORIZON TRAVELS",
     "tagline": "Your Trusted Travel Partner",
-    "email": "ankitrajvm@gmail.com",
+    "email": "ankit.gupta200392@gmail.com",
     "phone": "+91 7759069422",
-    "address": "Subhash Nagar, Dehradun, UTTARAKHAND, India",
-    "pincode": "248002",
+    "address": "NEW ASHOK NAGAR, Delhi, India",
+    "pincode": "110096",
 }
 
 AIRLINES = {

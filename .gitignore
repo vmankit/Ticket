@@ -1,7 +1,10 @@
 __pycache__/
 *.pyc
 venv/
+.venv/
 .env
+booking_counter.json
+ticket_records.xlsx.corrupt.*
 .idea/
 .vscode/
 *.pdf

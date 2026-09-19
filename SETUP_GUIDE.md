@@ -280,9 +280,15 @@ tracker stays a spreadsheet beside the code.
 
 ## ▲ Deploying to Vercel
 
-`vercel.json` routes every path to `api/index.py`, which puts the repository
-root on the import path and re-exports the same Flask app. Import the repo,
-pick the **Flask** preset, and deploy.
+Import the repo, pick the **Flask** preset, and deploy. The preset finds
+`app.py` and serves the Flask app itself, so `vercel.json` sets environment
+defaults and nothing else.
+
+**Do not add a `rewrites` rule pointing at a function.** Vercel routes backend
+frameworks by the rewritten *destination* path, so a catch-all rewrite hands
+Flask that destination instead of the URL the visitor asked for, and every
+route 404s. `api/index.py` stays as an explicit WSGI entry point for hosts that
+want one; the preset does not need it.
 
 Set `DATABASE_URL` in the project's environment variables, exactly as on
 Render. It matters more here, not less: a serverless function's filesystem is

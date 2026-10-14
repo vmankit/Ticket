@@ -52849,5 +52849,11 @@ AIRPORTS_DB = {
     "airport": "Zanesville Municipal Airport",
     "country": "US",
     "type": "medium"
+  },
+  "NNS": {
+    "city": "Pithoragarh",
+    "airport": "Naini Saini Airport",
+    "country": "IN",
+    "type": "medium"
   }
 }

@@ -5,6 +5,7 @@ from reportlab.platypus import Table, TableStyle, Paragraph, Spacer, Image
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.pdfgen import canvas
 from reportlab.graphics.barcode.code128 import Code128
+import base64
 import io
 import json
 import logging
@@ -26,7 +27,7 @@ try:
     CSRF_AVAILABLE = True
 except ImportError:
     CSRF_AVAILABLE = False
-    print("⚠️ Warning: flask_wtf not installed. CSRF protection disabled. Run: pip install flask-wtf")
+    print("[WARN] flask_wtf not installed. CSRF protection disabled. Run: pip install flask-wtf")
 
 # ─── Import comprehensive airport DB from CSV extraction ────────────
 from airports_data import AIRPORTS_DB
@@ -51,8 +52,14 @@ from ticket_parsing import (
     ocr_pdf_pages,
     parse_agency_ticket,
     ocr_passenger_names,
+    parse_airindia_express_itinerary,
+    parse_akasa_ticket,
+    parse_boarding_pass,
+    parse_cleartrip_ticket,
     parse_columnar_ticket,
+    parse_makemytrip_ticket,
     parse_own_ticket,
+    parse_paytm_ticket,
     parse_stacked_itinerary,
 )
 from validation import (
@@ -94,13 +101,13 @@ app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_BYTES
 if CSRF_AVAILABLE:
     csrf = CSRFProtect(app)
     app.config['WTF_CSRF_TIME_LIMIT'] = None  # No time limit on CSRF tokens
-    print("✓ CSRF protection enabled")
+    print("[OK] CSRF protection enabled")
 else:
     # Provide dummy csrf_token function for templates when CSRF not available
     @app.context_processor
     def inject_csrf_token():
         return dict(csrf_token=lambda: "")
-    print("⚠️ CSRF protection disabled (flask_wtf not installed)")
+    print("[WARN] CSRF protection disabled (flask_wtf not installed)")
 
 
 def load_local_env():
@@ -121,15 +128,31 @@ def load_local_env():
 
 load_local_env()
 
-# ─── Company Details ────────────────────────────────────────────────
-COMPANY = {
-    "name": "BHARAT HORIZON TRAVELS",
-    "tagline": "Your Trusted Travel Partner",
-    "email": "ankit.gupta200392@gmail.com",
-    "phone": "+91 7759069422",
-    "address": "NEW ASHOK NAGAR, Delhi, India",
-    "pincode": "110096",
+# ─── Registered Agencies ────────────────────────────────────────────
+AGENCIES = {
+    "bharat_horizon": {
+        "id": "bharat_horizon",
+        "name": "BHARAT HORIZON TRAVELS",
+        "tagline": "Your Trusted Travel Partner",
+        "email": "ankit.gupta200392@gmail.com",
+        "phone": "+91 7759069422",
+        "address": "NEW ASHOK NAGAR, Delhi, India",
+        "pincode": "110096",
+        "initials": "BH",
+    },
+    "js_julfaqar": {
+        "id": "js_julfaqar",
+        "name": "JS JULFAQAR TRAVELS",
+        "tagline": "Your Trusted Travel Partner",
+        "email": "",
+        "phone": "+91 9601074574",
+        "address": "Plot No 309, Resma Nagar, Bhindi Bazar, Unn, Surat, Gujarat - 394210, India",
+        "pincode": "394210",
+        "initials": "JS",
+    },
 }
+DEFAULT_AGENCY_ID = "bharat_horizon"
+COMPANY = AGENCIES[DEFAULT_AGENCY_ID]
 
 # ─── Airline Database (comprehensive) ───────────────────────────────
 AIRLINES = {
@@ -137,7 +160,7 @@ AIRLINES = {
     "6E": "IndiGo", "AI": "Air India", "UK": "Vistara", "SG": "SpiceJet",
     "G8": "Go First", "QP": "Akasa Air", "I5": "AirAsia India",
     "IX": "Air India Express", "S5": "Star Air", "2T": "TruJet",
-    "8Y": "Pan Pacific Airlines", "E5": "Air Arabia India",
+    "9I": "Alliance Air", "8Y": "Pan Pacific Airlines", "E5": "Air Arabia India",
     # Middle East
     "EK": "Emirates", "EY": "Etihad Airways", "QR": "Qatar Airways",
     "FZ": "flydubai", "WY": "Oman Air", "GF": "Gulf Air", "SV": "Saudia",
@@ -187,7 +210,7 @@ AIRLINES = {
 AIRLINE_ALIASES = {
     # India
     "IGO": "6E", "AIC": "AI", "VTI": "UK", "SEJ": "SG", "GOW": "G8",
-    "AKJ": "QP", "IAD": "I5", "AIX": "IX", "AXB": "IX", "SDG": "S5",
+    "AKJ": "QP", "IAD": "I5", "AIX": "IX", "AXB": "IX", "SDG": "S5", "LLR": "9I",
     # Middle East
     "UAE": "EK", "ETD": "EY", "QTR": "QR", "FDB": "FZ", "OMA": "WY",
     "GFA": "GF", "SVA": "SV", "KAC": "KU", "RJA": "RJ", "MEA": "ME",
@@ -516,6 +539,48 @@ def _extract_ticket_fields(text, filename="", pages_words=None):
 
     platform = detect_platform(text_upper, filename)
 
+    # MakeMyTrip and Goibibo tickets
+    if "MAKEMYTRIP" in text_upper or "MAKEMY TRIP" in text_upper or "GOIBIBO" in text_upper or "BARCODE(S) FOR YOUR JOURNEY" in text_upper or ("BOOKING DETAILS" in text_upper and "TRAVELLER SEAT MEAL" in text_upper):
+        mmt = parse_makemytrip_ticket(text)
+        if mmt and (mmt.get("pnr") or mmt.get("flights")):
+            mmt["booking_platform"] = platform or mmt.get("booking_platform") or "MakeMyTrip"
+            return mmt
+
+    # Paytm flight e-tickets
+    if "PAYTM" in text_upper or "ONE97" in text_upper or "ONWARD FLIGHT PNR" in text_upper:
+        py = parse_paytm_ticket(text)
+        if py and (py.get("pnr") or py.get("flights")):
+            py["booking_platform"] = platform or "Paytm"
+            return py
+
+    # Cleartrip (standard Trip ID and B2B white-label agent tickets)
+    if "CLEARTRIP" in text_upper or "REFERENCE ID CT" in text_upper or re.search(r"\bCT\d{7,}\b", text_upper) or "TRIP ID" in text_upper:
+        ct = parse_cleartrip_ticket(text)
+        if ct and (ct.get("pnr") or ct.get("flights")):
+            ct["booking_platform"] = platform or "Cleartrip"
+            return ct
+
+    # Akasa Air direct tickets
+    if "AKASA" in text_upper or "QP " in text_upper or "BOOKING REFERENCE/PNR" in text_upper:
+        ak = parse_akasa_ticket(text)
+        if ak and (ak.get("pnr") or ak.get("flights")):
+            ak["booking_platform"] = platform or "Akasa Air"
+            return ak
+
+    # Boarding passes
+    if "BOARDING" in text_upper and ("GATE" in text_upper or "SEQUENCE" in text_upper):
+        bp = parse_boarding_pass(text)
+        if bp and (bp.get("pnr") or bp.get("flights")):
+            bp["booking_platform"] = platform or bp.get("booking_platform") or "Direct"
+            return bp
+
+    # Air India Express official itineraries
+    if "OPERATED BY AIR INDIA EXPRESS" in text_upper or ("ITINERARY GENERATED ON" in text_upper and "AIR INDIA EXPRESS" in text_upper):
+        aix = parse_airindia_express_itinerary(text)
+        if aix and (aix.get("pnr") or aix.get("flights")):
+            aix["booking_platform"] = platform or "Air India Express"
+            return aix
+
     # Some agency tickets lay the itinerary out as a real table. Flattened to
     # text those columns interleave, so they are read from word positions
     # instead - but only when that table is actually present.
@@ -584,6 +649,8 @@ def _extract_ticket_fields(text, filename="", pages_words=None):
         "DETAILS", "SECTOR", "SEATNO", "REFERENCE", "CONFIRM", "CONFIRMED",
         # Passenger-type words sit in the same row as the PNR on many tickets.
         "ADULT", "CHILD", "INFANT", "ADULTS", "SENIOR", "ECONOMY", "BUSINESS",
+        "BOOKED", "PASSENGER", "BARCODE", "WHERE", "WHICH", "TRAVEL", "SINGLE",
+        "ONLINE", "AIRPORT", "PERSON", "SPECIAL", "OPTION",
     }
 
     def looks_like_pnr(value):
@@ -747,7 +814,7 @@ def _extract_ticket_fields(text, filename="", pages_words=None):
             candidate = re.sub(r"^\s*\d{1,2}[.)]\s*", "", upper)
             match = re.search(
                 r"\b(MR|MRS|MS|MISS|MSTR|CHD|INF)\.?\s+([A-Z][A-Z\s']{2,40}?)"
-                r"(?=\s*[,|]|\s{2,}|\s+\d|$)", candidate)
+                r"(?=\s*[,|]|\s{2,}|\s+\d|\s*\(|\s*-|$)", candidate)
             if match:
                 name = re.sub(r"\s{2,}", " ", match.group(2)).strip()
                 if len(name.split()) < 2:
@@ -924,9 +991,15 @@ def index():
     # The page used to hardcode the trading name and a "BT" monogram while the
     # PDF derived both from COMPANY, so renaming the agency changed the ticket
     # but not the site it was issued from.
-    initials = "".join(w[0] for w in re.findall(r"[A-Za-z]+", COMPANY["name"]))[:2].upper()
-    return render_template("index.html", fare_types=FARE_TYPES,
-                           company=COMPANY, initials=initials or "BH")
+    initials = COMPANY.get("initials") or "".join(w[0] for w in re.findall(r"[A-Za-z]+", COMPANY["name"]))[:2].upper()
+    return render_template(
+        "index.html",
+        fare_types=FARE_TYPES,
+        company=COMPANY,
+        agencies=AGENCIES,
+        current_agency_id=DEFAULT_AGENCY_ID,
+        initials=initials or "BH",
+    )
 
 
 @app.route("/api/search-airports", methods=["GET"])
@@ -1146,6 +1219,16 @@ def parse_ticket():
         )
     else:
         log.info("PDF parsed but platform not recognised; manual entry may be needed.")
+
+    # ── Auto-fetch barcode from PDF ──────────────────────────
+    bc_path, bc_data = extract_barcode_from_pdf_bytes(data)
+    if not bc_path and extracted.get("pnr"):
+        bc_path, bc_data = generate_code128_barcode(extracted.get("pnr"))
+    if bc_path:
+        extracted["barcode_token"] = bc_path
+        extracted["barcode_data"] = bc_data
+        log.info("Auto-fetched barcode for %s (token=%s)", filename, bc_path)
+
     return jsonify(extracted)
 
 
@@ -1184,6 +1267,124 @@ PASSENGER_TYPES = ("Adult", "Child", "Infant")
 
 def format_money(amount):
     return f"INR {amount:,.2f}"
+
+
+def extract_barcode_from_pdf_bytes(pdf_bytes):
+    """Auto-fetches embedded airport/airline barcodes from uploaded PDF."""
+    try:
+        import pypdfium2 as pdfium
+        from PIL import ImageStat
+        doc = pdfium.PdfDocument(pdf_bytes)
+        for page_idx in range(len(doc)):
+            page = doc[page_idx]
+            for obj in page.get_objects():
+                if obj.type == pdfium.raw.FPDF_PAGEOBJ_IMAGE:
+                    bounds = obj.get_bounds() # left, bottom, right, top
+                    w = bounds[2] - bounds[0]
+                    h = bounds[3] - bounds[1]
+                    aspect = w / h if h > 0 else 0
+                    if 1.3 <= aspect <= 8.0 and w >= 50 and h >= 12:
+                        bm = obj.get_bitmap()
+                        pil_img = bm.to_pil()
+                        pw, ph = pil_img.size
+                        if pw < 80 or ph < 20:
+                            continue
+                        rgb = pil_img.convert("RGB")
+                        stat = ImageStat.Stat(rgb)
+                        r_mean, g_mean, b_mean = stat.mean[:3]
+                        # Barcodes are B&W / grayscale
+                        if abs(r_mean - g_mean) > 18 or abs(g_mean - b_mean) > 18:
+                            continue
+                        if stat.stddev[0] < 25:
+                            continue
+                        if bounds[1] > 740 and page_idx == 0:
+                            continue
+                        
+                        path = os.path.join(tempfile.gettempdir(), secure_filename(f"temp_barcode_{uuid.uuid4()}.png"))
+                        pil_img.save(path, format="PNG")
+                        buf = io.BytesIO()
+                        pil_img.save(buf, format="PNG")
+                        b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
+                        return path, f"data:image/png;base64,{b64}"
+    except Exception as exc:
+        log.warning("Could not auto-extract barcode from PDF: %s", exc)
+    return None, None
+
+
+def generate_code128_barcode(data, height=55, bar_width=2):
+    """Pure-Python standard Code128 barcode generator."""
+    try:
+        from PIL import Image as PILImage, ImageDraw
+        PATS = [
+            '212222', '222122', '222221', '121223', '121322', '131222', '122213', '122312',
+            '132212', '221213', '221312', '231212', '112232', '122132', '122231', '113222',
+            '123122', '123221', '223211', '221132', '221231', '213212', '223112', '312131',
+            '311222', '321122', '321221', '312212', '322112', '322211', '212123', '212321',
+            '232121', '111323', '131123', '131321', '112313', '132113', '132311', '211313',
+            '231113', '231311', '112133', '112331', '132131', '113123', '113321', '133121',
+            '313121', '211331', '231131', '213113', '213311', '213131', '311123', '311321',
+            '331121', '312113', '312311', '332111', '314111', '221411', '431111', '111224',
+            '111422', '121124', '121421', '141122', '141221', '112214', '112412', '122114',
+            '122411', '142112', '142211', '241211', '221114', '413111', '241112', '134111',
+            '111242', '121142', '121241', '114212', '124112', '124211', '411212', '421112',
+            '421211', '212141', '214121', '412121', '111143', '111341', '131141', '114113',
+            '114311', '411113', '411311', '113141', '114131', '311141', '411131',
+        ]
+        pattern = '211214' # Start B
+        checksum = 104
+        val_str = str(data).strip().upper() or "FLIGHT"
+        for i, char in enumerate(val_str):
+            val = ord(char) - 32
+            if 0 <= val < len(PATS):
+                checksum += val * (i + 1)
+                pattern += PATS[val]
+        chk_val = checksum % 103
+        if 0 <= chk_val < len(PATS):
+            pattern += PATS[chk_val]
+        pattern += '2331112'
+
+        total_modules = sum(int(c) for c in pattern)
+        margin = 12
+        img_w = total_modules * bar_width + 2 * margin
+        img = PILImage.new('RGB', (img_w, height), 'white')
+        draw = ImageDraw.Draw(img)
+        x = margin
+        is_bar = True
+        for c in pattern:
+            w = int(c) * bar_width
+            if is_bar:
+                draw.rectangle([x, 0, x + w - 1, height], fill='black')
+            x += w
+            is_bar = not is_bar
+        
+        path = os.path.join(tempfile.gettempdir(), secure_filename(f"temp_barcode_{uuid.uuid4()}.png"))
+        img.save(path, format="PNG")
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
+        return path, f"data:image/png;base64,{b64}"
+    except Exception as exc:
+        log.warning("Could not generate fallback Code128 barcode: %s", exc)
+        return None, None
+
+
+def save_base64_barcode(data_url):
+    """Decode a base64 data URL and save as a temp PNG file."""
+    try:
+        header, encoded = data_url.split(",", 1)
+        data = base64.b64decode(encoded)
+        from PIL import Image as PILImage
+        with PILImage.open(io.BytesIO(data)) as img:
+            normalised = img.convert("RGB")
+        path = os.path.join(tempfile.gettempdir(), secure_filename(f"temp_barcode_{uuid.uuid4()}.png"))
+        normalised.save(path, format="PNG")
+        if not hasattr(g, "temp_files"):
+            g.temp_files = []
+        g.temp_files.append(path)
+        return path
+    except Exception as exc:
+        log.warning("Could not decode base64 barcode: %s", exc)
+        return None
 
 
 def save_barcode_upload(upload):
@@ -1309,9 +1510,11 @@ def generate_ticket():
     booking_date = request.form.get("booking_date", "")
     pnr = request.form.get("pnr", "")
     
-    # ── Agency Contact ─────────────────────────────
-    agency_phone = request.form.get("agency_phone", "").strip() or COMPANY["phone"]
-    agency_email = request.form.get("agency_email", "").strip() or COMPANY["email"]
+    # ── Agency Selection & Contact ─────────────────
+    agency_id = request.form.get("agency_id", DEFAULT_AGENCY_ID).strip()
+    selected_agency = AGENCIES.get(agency_id, COMPANY)
+    agency_phone = request.form.get("agency_phone", "").strip() or selected_agency.get("phone", "")
+    agency_email = request.form.get("agency_email", "").strip() or selected_agency.get("email", "")
     
     # ── Custom Contact ─────────────────────────────
     customer_phone = request.form.get("customer_phone", "").strip()
@@ -1406,6 +1609,23 @@ def generate_ticket():
 
         barcode_file = request.files.get(f"{prefix}barcode")
         temp_barcode_path = save_barcode_upload(barcode_file)
+        if not temp_barcode_path:
+            bc_token = request.form.get(f"{prefix}barcode_token", "").strip() or request.form.get("auto_barcode_token", "").strip()
+            bc_data = request.form.get(f"{prefix}barcode_data", "").strip() or request.form.get("auto_barcode_data", "").strip()
+            if bc_token and os.path.exists(bc_token):
+                temp_barcode_path = bc_token
+            elif bc_data and bc_data.startswith("data:image"):
+                temp_barcode_path = save_base64_barcode(bc_data)
+
+        segment_pnr = request.form.get(f"{prefix}segment_pnr", "").strip()
+        if not temp_barcode_path and pnr:
+            pnr_val = segment_pnr or pnr
+            gen_path, _ = generate_code128_barcode(pnr_val)
+            if gen_path:
+                temp_barcode_path = gen_path
+                if not hasattr(g, "temp_files"):
+                    g.temp_files = []
+                g.temp_files.append(temp_barcode_path)
 
         # Auto-fill city from DB
         if not from_city and from_code in AIRPORTS_DB:
@@ -1586,7 +1806,7 @@ def generate_ticket():
     buffer = io.BytesIO()
     t = TicketCanvas(buffer)
 
-    draw_header(t, company=COMPANY, pnr=pnr, booking_id=booking_id, status=ticket_status,
+    draw_header(t, company=selected_agency, pnr=pnr, booking_id=booking_id, status=ticket_status,
                 show_agency=not hide_agency)
 
     t.section("Itinerary", at=ITINERARY_BASE_MM)
@@ -1601,13 +1821,20 @@ def generate_ticket():
     draw_fares(t, total_fare_str, remarks=remarks,
                gst_company=gst_company, gstin=gstin, show_amount=not hide_fare)
 
+    contact_parts = []
+    if agency_email:
+        contact_parts.append(agency_email)
+    if agency_phone:
+        contact_parts.append(agency_phone)
+    contact_line = "  ·  ".join(contact_parts)
+
     draw_footer(
         t,
-        company=COMPANY,
+        company=selected_agency,
         show_agency=not hide_agency,
         issued=f"Issued {issued_at.strftime('%d %b %Y, %H:%M')} IST"
                f"  ·  {fare_type}  ·  {refund_status}",
-        contact_line=f"{agency_email}  ·  {agency_phone}",
+        contact_line=contact_line,
         terms="Show your barcode at the airport entry gate — it covers every flight on this "
               "ticket. Carry a valid government-issued photo ID. Check your baggage allowance "
               "and airline-specific requirements before heading to the airport. The PNR and "

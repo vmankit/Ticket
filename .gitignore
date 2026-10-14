@@ -4,6 +4,7 @@ venv/
 .venv/
 .env
 booking_counter.json
+*.lock
 ticket_records.xlsx.corrupt.*
 .idea/
 .vscode/

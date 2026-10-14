@@ -255,7 +255,7 @@ def draw_header(t, *, company, pnr, booking_id, status, show_agency=True):
     # Initials from the company name rather than a hardcoded pair, which was
     # still "AT" from a previous trading name.
     if show_agency:
-        initials = "".join(word[0] for word in re.findall(r"[A-Za-z]+", company["name"]))[:2].upper()
+        initials = company.get("initials") or "".join(word[0] for word in re.findall(r"[A-Za-z]+", company["name"]))[:2].upper()
         t.rounded(MARGIN, t.at(LOGO_TOP_MM) - size, size, size, 2.2 * MM, fill=INK, stroke=None)
         t.text(MARGIN + size / 2, t.at(LOGO_TOP_MM) - size / 2 - 3.4, initials or "BH",
                size=10, font=FONT_BOLD, color=white, align="center")
@@ -325,6 +325,32 @@ def _plane(t, cx, cy, size=11, angle=0):
         path.lineTo(x, -y)
     path.close()
     c.drawPath(path, fill=1, stroke=0)
+    c.restoreState()
+
+
+def _phone_icon(t, cx, cy, size=5.5, color=FAINT):
+    """Draw a clean vector telephone / call icon."""
+    c = t.c
+    c.saveState()
+    c.translate(cx, cy)
+    s = size / 10.0
+    c.scale(s, s)
+    c.setFillColor(color)
+    c.setStrokeColor(color)
+    c.setLineWidth(0.8)
+    c.setLineCap(1)
+    c.setLineJoin(1)
+    p = c.beginPath()
+    p.moveTo(-3.2, 3.8)
+    p.curveTo(-1.8, 5.0, 1.8, 5.0, 3.2, 3.8)
+    p.lineTo(2.0, 1.8)
+    p.lineTo(0.7, 2.3)
+    p.curveTo(-0.5, 0.7, -0.7, 0.5, -2.3, -0.7)
+    p.lineTo(-1.8, -2.0)
+    p.lineTo(-3.8, -3.2)
+    p.curveTo(-5.0, -1.8, -5.0, 1.8, -3.2, 3.8)
+    p.close()
+    c.drawPath(p, fill=1, stroke=1)
     c.restoreState()
 
 
@@ -679,6 +705,28 @@ def draw_footer(t, *, company, issued, contact_line, terms, show_agency=True):
     t.y -= height + (COMPANY_GAP_MM - TERMS_LEADING_MM + 2.6) * MM
     t.text(MARGIN, t.y, company["name"], size=8, font=FONT_BOLD, color=BODY)
     t.y -= FOOTER_LINE_MM * MM
-    t.text(MARGIN, t.y, f"{company['address']} - {company['pincode']}", size=8, color=FAINT)
-    t.y -= FOOTER_LINE_MM * MM
-    t.text(MARGIN, t.y, contact_line, size=8, color=FAINT)
+    addr = company.get("address", "")
+    pincode = company.get("pincode", "")
+    if pincode and str(pincode) not in addr:
+        addr = f"{addr} - {pincode}"
+    t.text(MARGIN, t.y, addr, size=8, color=FAINT)
+    if contact_line and contact_line.strip():
+        t.y -= FOOTER_LINE_MM * MM
+        cleaned = contact_line.strip()
+        if "·" in cleaned:
+            parts = [p.strip() for p in cleaned.split("·")]
+            email_part = parts[0] if "@" in parts[0] else ""
+            phone_part = parts[1] if len(parts) > 1 else parts[0]
+            if email_part and phone_part:
+                t.text(MARGIN, t.y, f"{email_part}  ·  ", size=8, color=FAINT)
+                email_w = t.c.stringWidth(f"{email_part}  ·  ", FONT, 8)
+                _phone_icon(t, MARGIN + email_w + 2.5, t.y + 2.6, size=5.5, color=FAINT)
+                t.text(MARGIN + email_w + 6.8, t.y, phone_part, size=8, color=FAINT)
+            else:
+                _phone_icon(t, MARGIN + 2.5, t.y + 2.6, size=5.5, color=FAINT)
+                t.text(MARGIN + 6.8, t.y, cleaned, size=8, color=FAINT)
+        elif any(char.isdigit() for char in cleaned):
+            _phone_icon(t, MARGIN + 2.5, t.y + 2.6, size=5.5, color=FAINT)
+            t.text(MARGIN + 6.8, t.y, cleaned, size=8, color=FAINT)
+        else:
+            t.text(MARGIN, t.y, cleaned, size=8, color=FAINT)

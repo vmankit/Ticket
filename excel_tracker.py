@@ -49,6 +49,7 @@ except OSError:
     DATA_DIR = os.path.dirname(os.path.abspath(__file__))
 
 EXCEL_FILE = os.path.join(DATA_DIR, "ticket_records.xlsx")
+EXCEL_LOCK_FILE = os.path.join(DATA_DIR, "ticket_records.lock")
 COUNTER_FILE = os.path.join(DATA_DIR, "booking_counter.json")
 
 # Guards the counter against other threads in this process; the OS file lock
@@ -158,7 +159,7 @@ def save_to_excel(data):
     while retry_count < max_retries:
         try:
             # Attempt to lock file
-            with open(EXCEL_FILE, 'a+b') as f:
+            with open(EXCEL_LOCK_FILE, 'a+') as f:
                 locked = lock_file(f)
                 if not locked and retry_count < max_retries - 1:
                     retry_count += 1

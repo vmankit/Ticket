@@ -226,9 +226,9 @@
     <div class="header">
         <div class="header-inner">
             <div class="brand-copy">
-                <div class="brand-mark">{{ initials }}</div>
+                <div class="brand-mark" id="topBrandMark">{{ initials }}</div>
                 <div>
-                    <h1>{{ company.name }}</h1>
+                    <h1 id="topBrandName">{{ company.name }}</h1>
                     <p>Professional E-Ticket Generator</p>
                 </div>
             </div>
@@ -239,6 +239,8 @@
     <div class="container">
         <form id="ticketForm" action="/generate" method="POST" enctype="multipart/form-data">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="auto_barcode_token" id="autoBarcodeToken">
+            <input type="hidden" name="auto_barcode_data" id="autoBarcodeData">
 
             <div id="advancedSection">
 
@@ -267,6 +269,23 @@
                     <h2>Booking Information</h2>
                 </div>
                 <div class="card-body">
+                    <div class="section-title"><span class="dot"></span>ISSUING TRAVEL AGENCY</div>
+                    <div class="form-grid" style="margin-bottom: 20px;">
+                        <div class="form-group" style="grid-column: 1 / -1;">
+                            <label style="font-weight:700; color:var(--primary); font-size:13px;">Select Travel Agency for Ticket Print <span class="req">*</span></label>
+                            <select name="agency_id" id="agencySelect" onchange="handleAgencyChange(this.value)" style="border: 2px solid var(--primary); font-weight: 600; padding: 10px 14px; font-size: 14px; border-radius: 8px;">
+                                {% for a_id, a_data in agencies.items() %}
+                                <option value="{{ a_id }}" {% if a_id == current_agency_id %}selected{% endif %}>
+                                    {{ a_data.name }} ({{ a_data.phone }} — {{ a_data.address[:45] }}...)
+                                </option>
+                                {% endfor %}
+                            </select>
+                            <div class="helper" id="agencyPreviewHelper" style="color:var(--text); font-weight:500; margin-top:8px; background:#f4f6fa; padding:10px 14px; border-radius:6px; border-left:4px solid var(--primary);">
+                                📍 <strong>Selected Agency for Ticket Print:</strong> <span id="agencySummaryText">{{ company.name }} | {{ company.address }} | 📞 {{ company.phone }}</span>
+                            </div>
+                        </div>
+                    </div>
+
                     <div class="section-title"><span class="dot"></span>BOOKING DETAILS</div>
                     <div class="form-grid three-col">
                         <div class="form-group">
@@ -1028,6 +1047,26 @@ function applyExtractedData(data){
         if(f.class)setSelectValue(document.querySelector(`[name="flight_${i}_class"]`), f.class);
     });
     if(data.refund_status)setSelectValue(document.querySelector('[name="refund_status"]'), data.refund_status);
+    if(data.fare_type)setSelectValue(document.querySelector('[name="fare_type"]'), data.fare_type);
+
+    // Auto-fetched barcode handling
+    const autoTokenEl = document.getElementById('autoBarcodeToken');
+    const autoDataEl = document.getElementById('autoBarcodeData');
+    if(autoTokenEl) autoTokenEl.value = data.barcode_token || '';
+    if(autoDataEl) autoDataEl.value = data.barcode_data || '';
+
+    const existingBc = document.getElementById('autoBarcodeBanner');
+    if(existingBc) existingBc.remove();
+    if(data.barcode_data){
+        const uploadStatus = document.getElementById('uploadStatus');
+        if(uploadStatus){
+            const banner = document.createElement('div');
+            banner.id = 'autoBarcodeBanner';
+            banner.style.cssText = 'margin-top:12px; background:#f0fdf4; border:1px solid #86efac; border-radius:6px; padding:10px 14px; display:flex; align-items:center; gap:12px;';
+            banner.innerHTML = `<img src="${data.barcode_data}" style="height:34px; max-width:200px; object-fit:contain; border:1px solid #cbd5e1; background:#fff; padding:3px; border-radius:4px;"> <span style="color:#15803d; font-weight:700; font-size:13px;">✓ Barcode auto-fetched from PDF</span>`;
+            uploadStatus.appendChild(banner);
+        }
+    }
 
     const pax=Array.isArray(data.passengers)?data.passengers:[];
     resetPassengers(pax.length||1);
@@ -1169,6 +1208,24 @@ if(extractBtn){
             extractBtn.innerHTML=extractHTML;
         }
     });
+}
+
+// ─── Agency Switcher ──────────────────────────────────────
+const agenciesData = {{ agencies|tojson }};
+function handleAgencyChange(agencyId){
+    const ag = agenciesData[agencyId];
+    if(!ag) return;
+    const topBrandMark = document.getElementById('topBrandMark');
+    const topBrandName = document.getElementById('topBrandName');
+    const agencySummaryText = document.getElementById('agencySummaryText');
+    if(topBrandMark) topBrandMark.textContent = ag.initials || 'AT';
+    if(topBrandName) topBrandName.textContent = ag.name;
+    if(agencySummaryText){
+        const pin = ag.pincode && !ag.address.includes(ag.pincode) ? ` - ${ag.pincode}` : '';
+        const ph = ag.phone ? ` | 📞 ${ag.phone}` : '';
+        const em = ag.email ? ` | ✉ ${ag.email}` : '';
+        agencySummaryText.textContent = `${ag.name} | ${ag.address}${pin}${ph}${em}`;
+    }
 }
 
 // ─── Fill sample ticket data ───────────────────────────────

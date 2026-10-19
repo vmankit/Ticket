@@ -29,16 +29,18 @@ MARGIN = MARGIN_MM * MM
 CONTENT_W = PAGE_W - 2 * MARGIN
 
 # Header
-LOGO_TOP_MM, LOGO_SIZE_MM = 13.0, 10.0
-BRAND_BASE_MM = 18.5
-BOOKING_BASE_MM = 28.3
-PNR_LABEL_BASE_MM = 18.3
-PNR_BASE_MM = 27.5
+LOGO_TOP_MM, LOGO_SIZE_MM = 12.0, 10.5
+BRAND_BASE_MM = 17.0
+SUB_AGENCY_BASE_MM = 21.6
+PNR_LABEL_BASE_MM = 17.0
+PNR_BASE_MM = 26.0
+DIVIDER_BASE_MM = 29.5
+META_BASE_MM = 34.0
 
 # Itinerary
-ITINERARY_BASE_MM = 39.0
+ITINERARY_BASE_MM = 42.0
 SECTION_GAP_MM = 3.5      # section label baseline to the block beneath it
-CARD_TOP_MM = 43.0
+CARD_TOP_MM = 45.8
 CARD_RADIUS_MM = 4.5
 CARD_GAP_MM = 4.0
 
@@ -243,76 +245,88 @@ def _fmt(value, fallback="—"):
 
 
 def draw_header(t, *, company, pnr, booking_id, status, show_agency=True):
-    """Wordmark, contact/address and booking reference on the left, PNR set large on the right.
+    """Clean, balanced two-tier executive airline header.
 
-    Agency details (name, phone, address) appear at the top of the ticket.
+    Tier 1 (Branding & Reference):
+      - Left: Monogram mark [JS] + Agency Name + Unified Contact/Address line
+      - Right: PNR label + Large PNR code
+    Tier 2 (Metadata Strip):
+      - Hairline separator rule
+      - Left: E-TICKET · Booking ID
+      - Right: Status badge aligned to right margin
     """
     right = PAGE_W - MARGIN
     size = LOGO_SIZE_MM * MM
 
-    # Initials from the company name rather than a hardcoded pair
+    # Initials monogram
     if show_agency:
         initials = company.get("initials") or "".join(word[0] for word in re.findall(r"[A-Za-z]+", company["name"]))[:2].upper()
-        t.rounded(MARGIN, t.at(LOGO_TOP_MM) - size, size, size, 2.2 * MM, fill=INK, stroke=None)
-        t.text(MARGIN + size / 2, t.at(LOGO_TOP_MM) - size / 2 - 3.4, initials or "JS",
-               size=10, font=FONT_BOLD, color=white, align="center")
+        t.rounded(MARGIN, t.at(LOGO_TOP_MM) - size, size, size, 2.5 * MM, fill=INK, stroke=None)
+        t.text(MARGIN + size / 2, t.at(LOGO_TOP_MM) - size / 2 - 3.5, initials or "JS",
+               size=11, font=FONT_BOLD, color=white, align="center")
 
     wordmark = company["name"].upper() if show_agency else "E-TICKET"
-    brand_x = (MARGIN + size + 2.4 * MM) if show_agency else MARGIN
-    brand_size = 15.5
+    brand_x = (MARGIN + size + 3.0 * MM) if show_agency else MARGIN
+    brand_size = 15.0
     room = (PAGE_W - MARGIN - 38 * MM) - brand_x
     while brand_size > 11 and t.c.stringWidth(wordmark, FONT_BOLD, brand_size) > room:
         brand_size -= 0.25
     t.text(brand_x, t.at(BRAND_BASE_MM), wordmark, size=brand_size, font=FONT_BOLD, color=INK)
 
+    # Unified contact & address line beside the monogram
     phone = (company.get("phone") or "").strip()
     addr = (company.get("address") or "").strip()
     pincode = (company.get("pincode") or "").strip()
     if pincode and str(pincode) not in addr:
         addr = f"{addr} - {pincode}"
-
-    curr_top_y = BRAND_BASE_MM
-    if show_agency and phone:
-        curr_top_y += 4.2
-        phone_y = t.at(curr_top_y)
-        _phone_icon(t, brand_x + 1.8, phone_y + 2.4, size=5.2, color=MUTED)
-        t.text(brand_x + 5.2, phone_y, phone, size=8.5, font=FONT_BOLD, color=MUTED)
-
-    if show_agency and addr:
-        curr_top_y += 4.0
-        addr_y = t.at(curr_top_y)
-        max_addr_w = (PAGE_W - MARGIN - 34 * MM) - brand_x
-        addr_size = 7.2
-        while addr_size > 5.5 and t.c.stringWidth(addr, FONT, addr_size) > max_addr_w:
-            addr_size -= 0.2
-        t.text(brand_x, addr_y, addr, size=addr_size, font=FONT, color=FAINT)
+    if addr.endswith(", India"):
+        addr = addr[:-7].strip()
 
     if show_agency and (phone or addr):
-        booking_y = t.at(curr_top_y + 4.8)
-    else:
-        booking_y = t.at(BOOKING_BASE_MM)
+        sub_y = t.at(SUB_AGENCY_BASE_MM)
+        cursor_x = brand_x
+        if phone:
+            t.text(cursor_x, sub_y, phone, size=8.5, font=FONT_BOLD, color=BODY)
+            cursor_x += t.c.stringWidth(phone, FONT_BOLD, 8.5) + 3.0 * MM
+            if addr:
+                t.text(cursor_x - 1.5 * MM, sub_y, "·", size=9.0, font=FONT_BOLD, color=FAINT)
+                cursor_x += 2.0 * MM
+        if addr:
+            max_w = (PAGE_W - MARGIN - 36 * MM) - cursor_x
+            addr_size = 8.0
+            while addr_size > 6.0 and t.c.stringWidth(addr, FONT, addr_size) > max_w:
+                addr_size -= 0.2
+            t.text(cursor_x, sub_y, addr, size=addr_size, font=FONT, color=MUTED)
 
-    # Without the agency the wordmark already says E-TICKET, so the line below
-    # carries the reference alone rather than repeating the word.
-    if show_agency:
-        subtitle = "E-ticket" + (f"  \u00b7  Booking {booking_id}" if booking_id else "")
-    else:
-        subtitle = f"Booking {booking_id}" if booking_id else "E-ticket"
-    t.text(MARGIN, booking_y, subtitle, size=8.8, color=MUTED)
-
-    # The status rides the booking line
-    colour = STATUS_COLORS.get(status, STATUS_COLORS["Confirmed"])
-    tint = STATUS_TINTS.get(status, STATUS_TINTS["Confirmed"])
-    subtitle_w = t.c.stringWidth(subtitle, FONT, 8.8)
-    t.pill(MARGIN + subtitle_w + 5 * MM, booking_y - 2.6, status.upper(),
-           fill=tint, color=colour, size=6.8, pad=2.4 * MM, height=4.6 * MM)
-
+    # PNR Block on the right
     label_w = t.c.stringWidth("PNR", FONT_BOLD, 8) + 3 * 2.6
     t.tracked(right - label_w, t.at(PNR_LABEL_BASE_MM), "PNR", size=8, tracking=2.6)
     t.text(right, t.at(PNR_BASE_MM), pnr or "\u2014", size=28,
            font=FONT_BOLD, color=INK, align="right")
 
-    t.y = min(booking_y - 6 * MM, t.at(PNR_BASE_MM))
+    # Hairline divider between Branding and Ticket Metadata
+    bar_y = t.at(DIVIDER_BASE_MM)
+    t.rule(MARGIN, bar_y, CONTENT_W, color=HexColor("#EEF0F3"), line_width=0.75)
+
+    # Metadata strip: E-ticket · Booking ID on left, Status badge right-aligned
+    meta_y = t.at(META_BASE_MM)
+    if show_agency:
+        t.tracked(MARGIN, meta_y, "E-TICKET", size=8.0, tracking=1.5, color=MUTED)
+        et_w = t.c.stringWidth("E-TICKET", FONT_BOLD, 8.0) + 7 * 1.5
+        if booking_id:
+            t.text(MARGIN + et_w + 3 * MM, meta_y, f"·   Booking ID: {booking_id}", size=8.5, color=MUTED)
+    else:
+        booking_str = f"Booking ID: {booking_id}" if booking_id else "E-Ticket"
+        t.text(MARGIN, meta_y, booking_str, size=8.8, color=MUTED)
+
+    status_str = status.upper()
+    colour = STATUS_COLORS.get(status, STATUS_COLORS["Confirmed"])
+    tint = STATUS_TINTS.get(status, STATUS_TINTS["Confirmed"])
+    pill_w = t.c.stringWidth(status_str, FONT_BOLD, 7.0) + 2 * (3.0 * MM)
+    t.pill(right - pill_w, meta_y - 2.2, status_str,
+           fill=tint, color=colour, size=7.0, pad=3.0 * MM, height=4.8 * MM)
+
+    t.y = t.at(META_BASE_MM + 2.5)
 
 
 # Half a top-down airliner, nose at +x; mirrored about y to draw the whole.

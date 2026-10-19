@@ -154,7 +154,7 @@ AGENCIES = {
         "initials": "JS",
     },
 }
-DEFAULT_AGENCY_ID = "bharat_horizon"
+DEFAULT_AGENCY_ID = "js_julfaqar"
 COMPANY = AGENCIES[DEFAULT_AGENCY_ID]
 
 # ─── Airline Database (comprehensive) ───────────────────────────────

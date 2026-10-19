@@ -4,6 +4,7 @@ reportlab
 openpyxl
 qrcode[pil]
 pdfplumber
+pypdfium2
 gunicorn
 
 # OCR for scanned/photographed tickets. PyMuPDF renders the pages and needs no

@@ -220,6 +220,31 @@
         ::-webkit-scrollbar{width:6px}
         ::-webkit-scrollbar-track{background:transparent}
         ::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+
+        /* AI Prompt Section */
+        .ai-section{border-top:1px solid var(--border);margin-top:20px;padding-top:18px}
+        .ai-section .section-title{font-size:.7rem;font-weight:800;letter-spacing:1.6px;text-transform:uppercase;color:var(--primary-light);margin-bottom:12px;padding-bottom:6px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px}
+        .ai-section .section-title .dot{width:8px;height:8px;background:#8b5cf6;border-radius:2px;transform:rotate(45deg)}
+        .ai-steps{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-bottom:16px}
+        @media(max-width:768px){.ai-steps{grid-template-columns:1fr}}
+        .ai-step{background:var(--surface-alt);border:1px solid var(--border);border-radius:10px;padding:14px 16px;position:relative}
+        .ai-step .step-num{position:absolute;top:-8px;left:12px;background:#8b5cf6;color:#fff;font-size:.58rem;font-weight:800;padding:2px 8px;border-radius:999px;letter-spacing:.8px}
+        .ai-step p{font-size:.78rem;color:var(--text);margin-top:4px;line-height:1.5}
+        .ai-step strong{color:var(--primary);font-size:.82rem}
+        .btn-ai{background:linear-gradient(135deg,#8b5cf6,#6d28d9);color:#fff;border:none;padding:11px 20px;font-size:.82rem;font-weight:700;border-radius:8px;cursor:pointer;transition:all .2s;font-family:'Inter',sans-serif;box-shadow:0 8px 20px rgba(109,40,217,.25);display:inline-flex;align-items:center;gap:6px}
+        .btn-ai:hover{transform:translateY(-1px);box-shadow:0 12px 28px rgba(109,40,217,.3)}
+        .btn-ai:active{transform:translateY(0)}
+        .btn-ai-outline{background:transparent;color:#8b5cf6;border:1.5px solid #8b5cf6;padding:11px 20px;font-size:.82rem;font-weight:700;border-radius:8px;cursor:pointer;transition:all .2s;font-family:'Inter',sans-serif;display:inline-flex;align-items:center;gap:6px}
+        .btn-ai-outline:hover{background:rgba(139,92,246,.08)}
+        .ai-textarea{width:100%;min-height:120px;max-height:300px;padding:12px 14px;border:1.5px solid var(--border);border-radius:10px;font-size:.82rem;font-family:'JetBrains Mono','Fira Code','Consolas',monospace;color:var(--text);background:var(--surface-alt);resize:vertical;line-height:1.5;transition:border-color .2s}
+        .ai-textarea:focus{border-color:#8b5cf6;outline:none;box-shadow:0 0 0 3px rgba(139,92,246,.12)}
+        .ai-textarea::placeholder{color:#a5afbf;font-family:'Inter',sans-serif;font-style:italic}
+        .ai-actions{display:flex;align-items:center;gap:10px;margin-top:12px;flex-wrap:wrap}
+        .ai-status{margin-top:12px;font-size:.75rem;color:var(--text-muted);background:var(--surface-alt);border:1px dashed var(--border);padding:10px 12px;border-radius:8px;min-height:18px;display:none}
+        .ai-status.visible{display:block}
+        .ai-badge{display:inline-flex;align-items:center;gap:5px;background:linear-gradient(135deg,rgba(139,92,246,.1),rgba(109,40,217,.08));color:#7c3aed;padding:5px 10px;border-radius:6px;font-size:.7rem;font-weight:700;border:1px solid rgba(139,92,246,.2);letter-spacing:.3px}
+        .ai-copy-success{color:#14845f;font-weight:700;font-size:.75rem;animation:fadeIn .3s ease}
+        @keyframes fadeIn{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:translateY(0)}}
     </style>
 </head>
 <body>
@@ -254,11 +279,55 @@
                             <div class="upload-status" id="uploadStatus" style="padding:12px 14px; color:var(--text);">
                                 Upload a digital PDF e-ticket to auto-extract fields (scanned images may not work).
                             </div>
-                            <div class="upload-actions" style="margin-top:14px;align-items:center;gap:12px;">
+                            <div class="upload-actions" style="margin-top:14px;align-items:center;gap:12px;flex-wrap:wrap;">
                                 <input type="file" id="ticketUpload" name="ticket_pdf" accept="application/pdf" style="padding:8px;">
                                 <button type="button" class="btn-generate" id="extractBtn" style="background:#0f2742;">Upload &amp; Parse PDF</button>
                                 <button type="button" class="btn-generate" id="sampleFillBtn" style="background:#666; box-shadow:0 12px 28px rgba(102,102,102,.2);">Fill Sample Ticket</button>
                             </div>
+                    <!-- ── AI-Assisted Extraction ────────────────── -->
+                    <div class="ai-section">
+                        <div class="section-title"><span class="dot"></span>AI-ASSISTED EXTRACTION <span class="ai-badge">✨ ChatGPT / Gemini</span></div>
+                        <div class="ai-steps">
+                            <div class="ai-step">
+                                <span class="step-num">STEP 1</span>
+                                <strong>Copy Prompt</strong>
+                                <p>Click the button below to copy the extraction prompt to your clipboard.</p>
+                            </div>
+                            <div class="ai-step">
+                                <span class="step-num">STEP 2</span>
+                                <strong>Ask AI</strong>
+                                <p>Open ChatGPT/Gemini, paste the prompt, and attach your ticket image/screenshot.</p>
+                            </div>
+                            <div class="ai-step">
+                                <span class="step-num">STEP 3</span>
+                                <strong>Paste Result</strong>
+                                <p>Copy the AI's JSON response and paste it below. Click Apply to auto-fill the form.</p>
+                            </div>
+                        </div>
+                        <div style="margin-bottom:14px;">
+                            <button type="button" class="btn-ai" id="copyPromptBtn" onclick="copyAiPrompt()">
+                                📋 Copy AI Prompt
+                            </button>
+                            <span id="copyPromptStatus" style="margin-left:10px;"></span>
+                        </div>
+                        <textarea class="ai-textarea" id="aiDataInput" placeholder='Paste the JSON output from ChatGPT / Gemini here...
+
+Example:
+{
+  "pnr": "ABC123",
+  "flights": [{"flight_no": "6E 2341", ...}],
+  "passengers": [{"name": "JOHN DOE", ...}]
+}'></textarea>
+                        <div class="ai-actions">
+                            <button type="button" class="btn-ai" id="applyAiBtn" onclick="applyAiData()">
+                                ⚡ Apply AI Data
+                            </button>
+                            <button type="button" class="btn-ai-outline" id="clearAiBtn" onclick="clearAiData()">
+                                ✕ Clear
+                            </button>
+                        </div>
+                        <div class="ai-status" id="aiStatus"></div>
+                    </div>
                 </div>
             </div>
 
@@ -989,18 +1058,78 @@ function resetPassengers(count){
 }
 
 function setSelectValue(el, wanted){
-    if(!el || !wanted) return false;
-    const want=String(wanted).toUpperCase().replace(/\s+/g,'');
+    if(!el || wanted === undefined || wanted === null) return false;
+    const strWanted = String(wanted).trim();
+    if(!strWanted) return false;
+
+    const want = strWanted.toUpperCase().replace(/\s+/g,'');
+
+    // 1. Direct match (case- and whitespace-insensitive)
     for(const opt of el.options){
-        if(opt.value.toUpperCase().replace(/\s+/g,'')===want){el.value=opt.value;return true;}
-    }
-    // "7KG" from a ticket should still find "7 KG (1 Piece)".
-    const kg=want.match(/(\d{1,2})KG/);
-    if(kg){
-        for(const opt of el.options){
-            if(opt.value.toUpperCase().replace(/\s+/g,'').startsWith(kg[1]+'KG')){el.value=opt.value;return true;}
+        if(opt.value.toUpperCase().replace(/\s+/g,'') === want){
+            el.value = opt.value;
+            return true;
         }
     }
+
+    // 2. Baggage-specific matching
+    const isBagSelect = el.name && el.name.includes('bag');
+    if(isBagSelect){
+        // A. Zero / No Baggage equivalents
+        if(/NOTALLOWED|NOBAGGAGE|NIL|NONE|\b0KG\b|HAND-?BAGGAGEONLY|CABINBAGGAGEONLY/.test(want)){
+            for(const opt of el.options){
+                if(opt.value.toUpperCase().includes('NO BAGGAGE')){
+                    el.value = opt.value;
+                    return true;
+                }
+            }
+        }
+
+        // B. Match by KG and piece count
+        const kgMatch = want.match(/(\d{1,2})KG/);
+        const pcMatch = want.match(/(\d)PIECE/);
+        if(kgMatch){
+            const kg = kgMatch[1];
+            const pc = pcMatch ? pcMatch[1] : null;
+
+            if(pc){
+                for(const opt of el.options){
+                    const optNorm = opt.value.toUpperCase().replace(/\s+/g,'');
+                    if(optNorm.includes(kg + 'KG') && optNorm.includes(pc + 'PIECE')){
+                        el.value = opt.value;
+                        return true;
+                    }
+                }
+            }
+
+            for(const opt of el.options){
+                const optNorm = opt.value.toUpperCase().replace(/\s+/g,'');
+                if(optNorm.startsWith(kg + 'KG')){
+                    el.value = opt.value;
+                    return true;
+                }
+            }
+        }
+
+        // C. If the airline specified a non-standard weight (e.g. 23 KG, 35 KG),
+        // add it as a new option and select it so the extracted value is never lost.
+        const customOpt = document.createElement('option');
+        customOpt.value = strWanted;
+        customOpt.textContent = strWanted;
+        el.appendChild(customOpt);
+        el.value = strWanted;
+        return true;
+    }
+
+    // General fallback: partial prefix/suffix match
+    for(const opt of el.options){
+        const optVal = opt.value.toUpperCase().replace(/\s+/g,'');
+        if(optVal && (optVal.startsWith(want) || want.startsWith(optVal))){
+            el.value = opt.value;
+            return true;
+        }
+    }
+
     return false;
 }
 
@@ -1010,23 +1139,30 @@ function applyExtractedData(data){
     if(data.booking_id)document.getElementById('bookingIdInput').value=data.booking_id;
     if(data.pnr)setInputValue('pnr',data.pnr);
     if(data.booking_date)document.getElementById('booking_date').value=data.booking_date;
-    if(data.customer_email)setInputValue('customer_email',data.customer_email);
-    if(data.customer_phone)setInputValue('customer_phone',data.customer_phone);
+    setInputValue('customer_email', data.customer_email || 'traveler@example.com');
+    setInputValue('customer_phone', data.customer_phone || '+91 9876543210');
 
     const base=parseFloat(data.base_fare||'');
     const taxes=parseFloat(data.taxes_fees||'');
     const total=parseFloat(data.total_fare||'');
     const disc=parseFloat(data.discount||'');
-    if(!isNaN(base))document.getElementById('baseFare').value=base;
-    if(!isNaN(taxes))document.getElementById('taxesFees').value=taxes;
-    // Without the discount the recalculated total comes out higher than the
-    // ticket being copied, so carry it across whenever the upload reports one.
-    if(!isNaN(disc))document.getElementById('discount').value=disc;
-    if(isNaN(base)&&isNaN(taxes)&&!isNaN(total)){
+    const hideFareCb=document.getElementById('hide_fare');
+
+    if(!isNaN(total) && total > 0 && (isNaN(base) || base === 0)){
         document.getElementById('baseFare').value=total;
+        document.getElementById('taxesFees').value=(!isNaN(taxes) && taxes > 0) ? taxes : 0;
+        if(hideFareCb) hideFareCb.checked=false;
+    } else if(!isNaN(base) && base > 0){
+        document.getElementById('baseFare').value=base;
+        document.getElementById('taxesFees').value=(!isNaN(taxes)) ? taxes : 0;
+        if(hideFareCb) hideFareCb.checked=false;
+    } else {
+        document.getElementById('baseFare').value=0;
         document.getElementById('taxesFees').value=0;
+        if(hideFareCb) hideFareCb.checked=true;
     }
-    if(!isNaN(base)||!isNaN(taxes)||!isNaN(total)||!isNaN(disc))calcTotal();
+    if(!isNaN(disc))document.getElementById('discount').value=disc;
+    calcTotal();
 
     const flights=Array.isArray(data.flights)?data.flights:[];
     resetFlights(flights.length||1);
@@ -1034,14 +1170,24 @@ function applyExtractedData(data){
         if(f.flight_no){const fno=document.getElementById('fno_'+i);fno.value=f.flight_no;detectAirline(fno,i);} 
         if(f.airline)document.getElementById('al_'+i).value=f.airline;
         if(f.segment_pnr)document.getElementById('pnr_'+i).value=f.segment_pnr;
-        if(f.from_code)document.getElementById('fc_'+i).value=f.from_code;
-        if(f.to_code)document.getElementById('tc_'+i).value=f.to_code;
+        if(f.from_code){
+            const fcEl=document.getElementById('fc_'+i);
+            if(fcEl){fcEl.value=f.from_code;fcEl.dispatchEvent(new Event('input'));}
+        }
+        if(f.to_code){
+            const tcEl=document.getElementById('tc_'+i);
+            if(tcEl){tcEl.value=f.to_code;tcEl.dispatchEvent(new Event('input'));}
+        }
         if(f.date)document.getElementById('fdate_'+i).value=f.date;
         if(f.dep_time_raw)document.getElementById('fdep_'+i).value=f.dep_time_raw;
         if(f.arr_time_raw)document.getElementById('farr_'+i).value=f.arr_time_raw;
         if(f.dep_time_raw&&f.arr_time_raw)calcDur('fdep_'+i,'farr_'+i,'fdur_'+i);
         const term=(n,v)=>{const el=document.querySelector(`[name="flight_${i}_${n}"]`); if(el&&v)el.value=v;};
         term('from_terminal', f.from_terminal); term('to_terminal', f.to_terminal);
+        if(f.manual_layover){
+            const layEl=document.querySelector(`[name="flight_${i}_layover"]`);
+            if(layEl) layEl.value=f.manual_layover;
+        }
         setSelectValue(document.querySelector(`[name="flight_${i}_checkin_bag"]`), f.checkin_bag);
         setSelectValue(document.querySelector(`[name="flight_${i}_hand_bag"]`), f.hand_bag);
         if(f.class)setSelectValue(document.querySelector(`[name="flight_${i}_class"]`), f.class);
@@ -1074,8 +1220,10 @@ function applyExtractedData(data){
         if(p.name)document.querySelector(`[name="pax_${i}_name"]`).value=p.name;
         if(p.dob)document.querySelector(`[name="pax_${i}_dob"]`).value=p.dob;
         if(p.passport)document.querySelector(`[name="pax_${i}_passport"]`).value=p.passport;
+        const doeEl=document.querySelector(`[name="pax_${i}_doe"]`);
+        if(doeEl&&p.doe)doeEl.value=p.doe;
         setSelectValue(document.querySelector(`[name="pax_${i}_title"]`), p.title);
-        setSelectValue(document.querySelector(`[name="pax_${i}_type"]`), p.pax_type);
+        setSelectValue(document.querySelector(`[name="pax_${i}_type"]`), p.pax_type || p.type || 'Adult');
     });
 
     // Ensure per-passenger per-segment fields are created and pre-filled from flight-level data
@@ -1237,6 +1385,101 @@ if(sampleFillBtn){
         statusEl.textContent=applyExtractedData(data);
         showToast('Sample ticket loaded. Click Generate to verify PDF output.');
     });
+}
+
+// ─── AI-Assisted Extraction ───────────────────────────────
+let _aiPromptCache=null;
+
+async function copyAiPrompt(){
+    const btn=document.getElementById('copyPromptBtn');
+    const status=document.getElementById('copyPromptStatus');
+    try{
+        if(!_aiPromptCache){
+            btn.innerHTML='<span class="spinner"></span> Loading...';
+            const res=await fetch('/api/ai-prompt');
+            const data=await res.json();
+            _aiPromptCache=data.prompt;
+        }
+        await navigator.clipboard.writeText(_aiPromptCache);
+        btn.innerHTML='✅ Prompt Copied!';
+        status.innerHTML='<span class="ai-copy-success">✓ Prompt copied to clipboard. Now open ChatGPT/Gemini, paste it, and attach your ticket.</span>';
+        showToast('AI prompt copied! Paste it in ChatGPT or Gemini.');
+        setTimeout(()=>{
+            btn.innerHTML='📋 Copy AI Prompt';
+        }, 3000);
+    }catch(err){
+        console.error('Copy failed:',err);
+        // Fallback: show prompt in textarea
+        if(_aiPromptCache){
+            document.getElementById('aiDataInput').value=_aiPromptCache;
+            status.innerHTML='<span style="color:var(--gold);font-weight:600;font-size:.75rem;">⚠ Could not copy automatically. The prompt is shown in the textarea — select all and copy manually.</span>';
+        }
+        btn.innerHTML='📋 Copy AI Prompt';
+    }
+}
+
+async function applyAiData(){
+    const textarea=document.getElementById('aiDataInput');
+    const statusEl=document.getElementById('aiStatus');
+    const btn=document.getElementById('applyAiBtn');
+    const text=textarea.value.trim();
+
+    if(!text){
+        statusEl.className='ai-status visible';
+        statusEl.innerHTML='<span style="color:var(--danger);font-weight:600;">Please paste the AI output first.</span>';
+        return;
+    }
+
+    // First try to parse client-side (if it's clean JSON, no need for server trip)
+    let data=null;
+    try{
+        let cleaned=text.replace(/^```(?:json)?\s*\n?/i,'').replace(/\n?```\s*$/,'').trim();
+        const jsonMatch=cleaned.match(/\{[\s\S]*\}/);
+        if(jsonMatch) {
+            let s=jsonMatch[0];
+            try{ data=JSON.parse(s); }
+            catch(e){ data=JSON.parse(s.replace(/\\([^"\\/bfnrtu])/g, '$1')); }
+        }
+    }catch(e){}
+
+    if(data && (data.pnr || data.flights || data.passengers)){
+        // Clean JSON parsed client-side, but still send to server for normalization
+    }
+
+    statusEl.className='ai-status visible';
+    statusEl.textContent='Processing AI data...';
+    const originalHTML=btn.innerHTML;
+    btn.disabled=true;
+    btn.innerHTML='<span class="spinner"></span> Applying...';
+
+    try{
+        const res=await fetch('/api/parse-ai-data',{
+            method:'POST',
+            headers:{'Content-Type':'application/json','X-CSRFToken':csrfToken()},
+            body:JSON.stringify({ai_text:text})
+        });
+        const result=await res.json();
+        if(!res.ok){
+            statusEl.innerHTML=`<span style="color:var(--danger);font-weight:600;">${result.error||'Failed to process AI data.'}</span>`;
+            return;
+        }
+        const msg=applyExtractedData(result);
+        statusEl.innerHTML=`<span style="color:var(--success);font-weight:600;">✓ ${msg}</span>`;
+        showToast('AI data applied! Review the fields and generate your ticket.');
+    }catch(err){
+        console.error('AI data error:',err);
+        statusEl.innerHTML='<span style="color:var(--danger);font-weight:600;">Could not reach the server. Check your connection.</span>';
+    }finally{
+        btn.disabled=false;
+        btn.innerHTML=originalHTML;
+    }
+}
+
+function clearAiData(){
+    document.getElementById('aiDataInput').value='';
+    const statusEl=document.getElementById('aiStatus');
+    statusEl.className='ai-status';
+    statusEl.textContent='';
 }
 
 // ─── Form submit — format times ───────────────────────────

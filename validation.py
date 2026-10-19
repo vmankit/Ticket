@@ -50,8 +50,11 @@ def parse_money(raw, field_label, errors, required=False, allow_negative=False):
         errors.append(f"{field_label} must be a real number.")
         return 0.0
     if not allow_negative and value < 0:
-        errors.append(f"{field_label} cannot be negative.")
-        return 0.0
+        if "discount" in field_label.lower():
+            value = abs(value)
+        else:
+            errors.append(f"{field_label} cannot be negative.")
+            return 0.0
     if abs(value) > MAX_FARE:
         errors.append(f"{field_label} is unrealistically large.")
         return 0.0
@@ -59,10 +62,27 @@ def parse_money(raw, field_label, errors, required=False, allow_negative=False):
 
 
 def _parse_date(value):
-    try:
-        return datetime.strptime(str(value).strip(), "%Y-%m-%d")
-    except (ValueError, TypeError):
+    val_str = str(value or "").strip()
+    if not val_str:
         return None
+    try:
+        return datetime.strptime(val_str, "%Y-%m-%d")
+    except (ValueError, TypeError):
+        pass
+    for fmt in ("%d-%m-%Y", "%d/%m/%Y", "%Y/%m/%d", "%d %b %Y", "%d %B %Y", "%b %d, %Y"):
+        try:
+            return datetime.strptime(val_str, fmt)
+        except (ValueError, TypeError):
+            continue
+    cleaned = re.sub(r"(\d+)(st|nd|rd|th)", r"\1", val_str, flags=re.I)
+    cleaned = re.sub(r"[,]", " ", cleaned)
+    cleaned = " ".join(cleaned.split())
+    for fmt in ("%d %b %Y", "%d %B %Y", "%b %d %Y"):
+        try:
+            return datetime.strptime(cleaned, fmt)
+        except (ValueError, TypeError):
+            continue
+    return None
 
 
 def _parse_time(value):
@@ -96,7 +116,11 @@ def validate_booking(form):
     if not phone:
         errors.append("Customer Phone is required.")
     elif not 7 <= len(digits) <= 15:
-        errors.append(f"Customer Phone \"{phone}\" does not look like a valid number.")
+        # Airline tickets often mask mobile numbers for privacy (e.g. +91-87******48)
+        if re.search(r"\*+", phone) and len(re.sub(r"[^\d*]", "", phone)) >= 7:
+            pass
+        else:
+            errors.append(f"Customer Phone \"{phone}\" does not look like a valid number.")
 
     booking_date = (form.get("booking_date") or "").strip()
     if booking_date and _parse_date(booking_date) is None:
@@ -105,7 +129,7 @@ def validate_booking(form):
     return errors
 
 
-def validate_flights(flights):
+def validate_flights(flights, trip_type=None):
     """Validate parsed flight segments. `flights` is the list built in /generate."""
     errors = []
 
@@ -147,17 +171,18 @@ def validate_flights(flights):
         if _parse_time(flight.get("arr_time_raw")) is None:
             errors.append(f"{label}: Arrival time is required (HH:MM).")
 
-    # Connecting segments must run forward in time and actually connect.
+    # Connecting segments check
     for idx in range(len(flights) - 1):
         current, following = flights[idx], flights[idx + 1]
         label = f"Flight {idx + 2}"
 
-        if current.get("to_code") and following.get("from_code"):
-            if current["to_code"] != following["from_code"]:
-                errors.append(
-                    f"{label}: departs from {following['from_code']} but "
-                    f"Flight {idx + 1} arrives at {current['to_code']}."
-                )
+        if trip_type not in ("Round Trip", "Multi-City"):
+            if current.get("to_code") and following.get("from_code"):
+                if current["to_code"] != following["from_code"]:
+                    errors.append(
+                        f"{label}: departs from {following['from_code']} but "
+                        f"Flight {idx + 1} arrives at {current['to_code']}."
+                    )
 
         current_date = _parse_date(current.get("date_raw"))
         current_arr = _parse_time(current.get("arr_time_raw"))
@@ -199,10 +224,10 @@ def validate_passengers(passengers):
             errors.append(f"Passenger {idx}: name is required.")
         elif len(name) < 2:
             errors.append(f"Passenger {idx}: name \"{name}\" is too short.")
-        elif not re.match(r"^[A-Za-z][A-Za-z .'\-]*$", name):
+        elif not re.match(r"^[A-Za-z][A-Za-z .'\-/]*$", name):
             errors.append(
                 f"Passenger {idx}: name \"{name}\" may only contain "
-                "letters, spaces, apostrophes, hyphens and periods."
+                "letters, spaces, apostrophes, hyphens, slashes and periods."
             )
 
     return errors

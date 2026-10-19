@@ -61,6 +61,9 @@ from ticket_parsing import (
     parse_own_ticket,
     parse_paytm_ticket,
     parse_stacked_itinerary,
+    normalize_baggage_label,
+    parse_regional_ticket,
+    parse_indigo_itinerary,
 )
 from validation import (
     parse_money,
@@ -309,6 +312,18 @@ def parse_date_str(value):
     value = (value or "").strip()
     if not value:
         return ""
+    if re.match(r"^\d{4}-\d{2}-\d{2}$", value):
+        try:
+            datetime.strptime(value, "%Y-%m-%d")
+            return value
+        except ValueError:
+            return ""
+    iso_match = re.search(r"\b(\d{4})[/-](\d{1,2})[/-](\d{1,2})\b", value)
+    if iso_match:
+        try:
+            return datetime(int(iso_match.group(1)), int(iso_match.group(2)), int(iso_match.group(3))).strftime("%Y-%m-%d")
+        except ValueError:
+            return ""
     slash_match = re.search(r"\b(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})\b", value)
     if slash_match:
         day = int(slash_match.group(1))
@@ -328,8 +343,8 @@ def parse_date_str(value):
     # which turned "32 Jan 2026" into 2026-01-20 instead of rejecting it.
     patterns = (
         # The year may be abbreviated with an apostrophe, as in "04 MAY '26".
-        rf"\b(\d{{1,2}})(?!\d)[\s\-.]*({month_names})[A-Z]*[\s\-.,']*(\d{{2,4}})\b",
-        rf"\b({month_names})[A-Z]*[\s\-.]+(\d{{1,2}})(?!\d)[\s\-.,']+(\d{{2,4}})\b",
+        rf"\b(\d{{1,2}})(?:ST|ND|RD|TH)?(?!\d)[\s\-.]*({month_names})[A-Z]*[\s\-.,']*(\d{{2,4}})\b",
+        rf"\b({month_names})[A-Z]*[\s\-.]+(\d{{1,2}})(?:ST|ND|RD|TH)?(?!\d)[\s\-.,']+(\d{{2,4}})\b",
     )
     for index, pattern in enumerate(patterns):
         match = re.search(pattern, upper)
@@ -447,6 +462,12 @@ def detect_platform(text_upper, filename=""):
         "CLEARTRIP": "Cleartrip",
         "GOIBIBO": "Goibibo",
         "PAYTM": "Paytm",
+        "GOINDIGO": "IndiGo",
+        "INDIGO": "IndiGo",
+        "AIR INDIA EXPRESS": "Air India Express",
+        "AKASA": "Akasa Air",
+        "SPICEJET": "SpiceJet",
+        "FLIPKART": "Flipkart",
     }
     for key, name in mapping.items():
         if key in haystack:
@@ -501,6 +522,65 @@ def _second_opinion(data, extracted, filename):
     if filled:
         log.info("Second reading of %s recovered %s.", filename, ", ".join(filled))
     return extracted
+
+
+def extract_ticket_with_gemini_vision(pdf_bytes, filename=""):
+    """Parse scanned / photographed ticket PDF pages via Gemini Vision."""
+    api_key = os.environ.get("GEMINI_API_KEY")
+    if not api_key:
+        return None
+    try:
+        import pypdfium2 as pdfium
+        import urllib.request
+        import base64
+        doc = pdfium.PdfDocument(io.BytesIO(pdf_bytes))
+        page_imgs = []
+        for i in range(min(2, len(doc))):
+            buf = io.BytesIO()
+            doc[i].render(scale=1.5).to_pil().save(buf, format="JPEG", quality=80)
+            page_imgs.append(base64.b64encode(buf.getvalue()).decode("ascii"))
+
+        prompt = (
+            "Extract all flight ticket details from this image as JSON with exact keys: "
+            "pnr, booking_id, booking_platform, booking_date (YYYY-MM-DD), customer_email, customer_phone, "
+            "base_fare, taxes_fees, total_fare, discount, refund_status, fare_type, "
+            "flights: list of {flight_no, airline, from_code (3-letter IATA), to_code (3-letter IATA), "
+            "date (YYYY-MM-DD), dep_time_raw (HH:MM), arr_time_raw (HH:MM), class, from_terminal, to_terminal, "
+            "checkin_bag, hand_bag}, "
+            "passengers: list of {title, name, type, seats, passport, dob, doe}. "
+            "Return ONLY valid JSON."
+        )
+        parts = [{"text": prompt}]
+        for b64 in page_imgs:
+            parts.append({"inline_data": {"mime_type": "image/jpeg", "data": b64}})
+
+        models = ["gemini-3.5-flash-lite", "gemini-2.5-flash", "gemini-3.5-flash", "gemini-2.5-flash-lite"]
+        for m in models:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent?key={api_key}"
+            payload = {
+                "contents": [{"parts": parts}],
+                "generationConfig": {"response_mime_type": "application/json"}
+            }
+            req = urllib.request.Request(
+                url, data=json.dumps(payload).encode("utf-8"),
+                headers={"Content-Type": "application/json"}
+            )
+            try:
+                with urllib.request.urlopen(req, timeout=30) as resp:
+                    resp_data = json.loads(resp.read().decode("utf-8"))
+                    cand_text = resp_data["candidates"][0]["content"]["parts"][0]["text"]
+                    parsed = json.loads(cand_text)
+                    if parsed and (parsed.get("pnr") or parsed.get("flights")):
+                        log.info("Gemini vision successfully parsed %s with model %s", filename, m)
+                        if parsed.get("discount"):
+                            parsed["discount"] = str(parsed["discount"]).replace("-", "").strip()
+                        return parsed
+            except Exception as exc:
+                log.warning("Gemini vision attempt with %s failed: %s", m, exc)
+                continue
+    except Exception as exc:
+        log.warning("Gemini vision extraction failed for %s: %s", filename, exc)
+    return None
 
 
 def extract_ticket_fields(text, filename="", pages_words=None):
@@ -567,19 +647,33 @@ def _extract_ticket_fields(text, filename="", pages_words=None):
             ak["booking_platform"] = platform or "Akasa Air"
             return ak
 
-    # Boarding passes
-    if "BOARDING" in text_upper and ("GATE" in text_upper or "SEQUENCE" in text_upper):
-        bp = parse_boarding_pass(text)
-        if bp and (bp.get("pnr") or bp.get("flights")):
-            bp["booking_platform"] = platform or bp.get("booking_platform") or "Direct"
-            return bp
-
     # Air India Express official itineraries
     if "OPERATED BY AIR INDIA EXPRESS" in text_upper or ("ITINERARY GENERATED ON" in text_upper and "AIR INDIA EXPRESS" in text_upper):
         aix = parse_airindia_express_itinerary(text)
         if aix and (aix.get("pnr") or aix.get("flights")):
             aix["booking_platform"] = platform or "Air India Express"
             return aix
+
+    # Regional / Heliport tickets (e.g. Heritage Aviation)
+    if "GAULAPAR" in text_upper or "NAINI SAINI" in text_upper or "HERITAGE AVIATION" in text_upper:
+        reg = parse_regional_ticket(text)
+        if reg and (reg.get("pnr") or reg.get("flights")):
+            reg["booking_platform"] = platform or "Direct/Walk-in"
+            return reg
+
+    # IndiGo official multi-leg itineraries
+    if "GOINDIGO" in text_upper or "6E ADD-ONS" in text_upper or ("PNR/BOOKING REFERENCE" in text_upper and "6E " in text_upper):
+        ig = parse_indigo_itinerary(text)
+        if ig and (ig.get("pnr") or ig.get("flights")):
+            ig["booking_platform"] = platform or "IndiGo"
+            return ig
+
+    # Boarding passes
+    if (("BOARDING PASS" in text_upper or "BOARDINGPASS" in text_upper) or ("BOARDING TIME" in text_upper and "GATE" in text_upper)) and "ITINERARY" not in text_upper and any(k in text_upper for k in ("GATE", "SEQUENCE", "ZONE", "SEAT")):
+        bp = parse_boarding_pass(text)
+        if bp and (bp.get("pnr") or bp.get("flights")):
+            bp["booking_platform"] = platform or bp.get("booking_platform") or "Direct"
+            return bp
 
     # Some agency tickets lay the itinerary out as a real table. Flattened to
     # text those columns interleave, so they are read from word positions
@@ -692,6 +786,8 @@ def _extract_ticket_fields(text, filename="", pages_words=None):
                     break
             if pnr:
                 break
+    if pnr and pnr.upper() in ("WEBSITE", "AIRLINE", "TICKET", "ONLINE", "FLIGHT", "PORTAL"):
+        pnr = ""
 
     booking_id = first_group([
         r"\bBOOKING\s*ID\b\s*[:\-]?\s*([A-Z0-9\-]{5,20})",
@@ -801,13 +897,14 @@ def _extract_ticket_fields(text, filename="", pages_words=None):
 
     passengers = []
     if platform or pnr or booking_id or ("TRAVELLER" in text_upper or "PASSENGER" in text_upper):
+        excl_keywords = [
+            "IMPORTANT", "PLEASE", "CARRY", "SECURITY", "CHECK-IN", "BOOKING", "ITINERARY",
+            "E-TICKET", "TRIP", "ROUTE", "SEGMENT", "FARE", "PAYMENT", "AMOUNT",
+            "BHARAT", "HORIZON", "TRAVELS", "ANKIT",
+        ]
         for line in lines:
             upper = line.upper()
-            if any(keyword in upper for keyword in [
-                "IMPORTANT", "PLEASE", "CARRY", "SECURITY", "CHECK-IN", "BOOKING", "ITINERARY",
-                "E-TICKET", "TRIP", "ROUTE", "SEGMENT", "FARE", "PAYMENT", "AMOUNT",
-                "BHARAT", "HORIZON", "TRAVELS", "ANKIT",
-            ]):
+            if any(re.search(r"\b" + kw + r"\b", upper) for kw in excl_keywords):
                 continue
             # Rows are often numbered ("1. Ms Alka Agarwal, YDKKHA"), so drop a
             # leading index before rejecting the line for containing digits.
@@ -816,13 +913,17 @@ def _extract_ticket_fields(text, filename="", pages_words=None):
                 r"\b(MR|MRS|MS|MISS|MSTR|CHD|INF)\.?\s+([A-Z][A-Z\s']{2,40}?)"
                 r"(?=\s*[,|]|\s{2,}|\s+\d|\s*\(|\s*-|$)", candidate)
             if match:
-                name = re.sub(r"\s{2,}", " ", match.group(2)).strip()
+                title = match.group(1).capitalize()
+                raw_name = match.group(2)
+                # Strip trailing type markers (Adult, Male, Female, etc.)
+                raw_name = re.sub(r"\b(ADULT|CHILD|INFANT|MALE|FEMALE)\b.*$", "", raw_name, flags=re.I)
+                name = re.sub(r"\s{2,}", " ", raw_name).strip()
                 if len(name.split()) < 2:
                     continue
                 if name and all(word not in STOPWORDS_3 for word in name.split()):
                     title_name = name.title()
                     if title_name not in [p["name"] for p in passengers]:
-                        passengers.append({"name": title_name})
+                        passengers.append({"name": title_name, "title": title})
 
     # Booking references are often UUIDs, and a chunk like "...-fd86-..." looks
     # exactly like a flight number, so drop them before scanning.
@@ -968,6 +1069,30 @@ def _extract_ticket_fields(text, filename="", pages_words=None):
             if not seg.get("flight_no"):
                 seg["flight_no"] = flight_no
                 seg["airline"] = AIRLINES.get(extract_airline_code(flight_no), "")
+
+    fallback_cbag = ""
+    fallback_hbag = ""
+    c_m = re.search(r"Check[- ]?in(?:\s*Baggage)?\s*[:\s]?\s*(\d{1,2}\s*kgs?(?:\s*\([^\)]+\))?|\d{1,2}\s*KG|Not Allowed|No Baggage|Nil|None)", text, re.I)
+    if c_m:
+        fallback_cbag = normalize_baggage_label(c_m.group(1), is_checkin=True)
+    h_m = re.search(r"(?:Cabin|Hand)(?:\s*Baggage)?\s*[:\s]?\s*(\d{1,2}\s*kgs?(?:\s*\([^\)]+\))?|\d{1,2}\s*KG|Not Allowed|No Baggage|Nil|None)", text, re.I)
+    if h_m:
+        fallback_hbag = normalize_baggage_label(h_m.group(1), is_checkin=False)
+
+    for seg in segments:
+        if not seg.get("checkin_bag") and fallback_cbag:
+            seg["checkin_bag"] = fallback_cbag
+        if not seg.get("hand_bag") and fallback_hbag:
+            seg["hand_bag"] = fallback_hbag
+        fc = seg.get("from_code", "")
+        tc = seg.get("to_code", "")
+        is_intl = any(c in ("SHJ", "DXB", "DMM", "RUH", "JED", "KWI", "MCT", "DOH", "SIN", "BKK") for c in (fc, tc))
+        if not seg.get("checkin_bag"):
+            seg["checkin_bag"] = "30 KG (1 Piece)" if is_intl else "15 KG (1 Piece)"
+        if not seg.get("hand_bag"):
+            seg["hand_bag"] = "7 KG (1 Piece)"
+        if not seg.get("date") and booking_date:
+            seg["date"] = booking_date
 
     return {
         "booking_platform": platform,
@@ -1164,6 +1289,24 @@ def parse_ticket():
                          len(text), filename, ocr_conf)
 
     if len(text) < 50:
+        vision_res = extract_ticket_with_gemini_vision(data, filename=filename)
+        if vision_res:
+            if not vision_res.get("booking_platform"):
+                vision_res["booking_platform"] = "Flipkart" if "FLIPKART" in filename.upper() else "Direct/Walk-in"
+            for f in vision_res.get("flights", []):
+                if f.get("date"):
+                    f["date"] = parse_date_str(f["date"])
+                if f.get("flight_no"):
+                    f["flight_no"] = re.sub(r"[-_]+", " ", f["flight_no"]).strip()
+                if not f.get("airline") and f.get("flight_no"):
+                    f["airline"] = AIRLINES.get(extract_airline_code(f["flight_no"]), "")
+                if not f.get("checkin_bag"):
+                    f["checkin_bag"] = "15 KG (1 Piece)"
+                if not f.get("hand_bag"):
+                    f["hand_bag"] = "7 KG (1 Piece)"
+            log.info("Returning Gemini vision parsed ticket for %s", filename)
+            return jsonify(vision_res)
+
         if not ocr_available():
             log.warning("Scanned PDF and OCR is unavailable: %s", filename)
             return jsonify({
@@ -1232,9 +1375,318 @@ def parse_ticket():
     return jsonify(extracted)
 
 
+@app.route("/api/ai-prompt", methods=["GET"])
+def ai_prompt():
+    """Return the AI extraction prompt so the front end can display it."""
+    prompt = (
+        "Extract ALL flight ticket information from this image/PDF and return ONLY a valid JSON object (no markdown, no explanation, no extra text). "
+        "Use this EXACT structure:\n\n"
+        "{\n"
+        '  "pnr": "AIRLINE PNR CODE",\n'
+        '  "booking_id": "BOOKING/ORDER ID if visible",\n'
+        '  "booking_platform": "MakeMyTrip / Cleartrip / Goibibo / Paytm / Direct etc.",\n'
+        '  "booking_date": "YYYY-MM-DD",\n'
+        '  "customer_email": "email if visible",\n'
+        '  "customer_phone": "phone if visible",\n'
+        '  "base_fare": "number only e.g. 3500",\n'
+        '  "taxes_fees": "number only e.g. 850",\n'
+        '  "total_fare": "number only e.g. 4350",\n'
+        '  "discount": "number only, 0 if none",\n'
+        '  "refund_status": "Refundable / Non-Refundable / Partially Refundable",\n'
+        '  "fare_type": "REGULAR / SAVER / FLEXI / NDC FARE / SME FARE / CORPORATE FARE / STUDENT FARE / SPECIAL FARE",\n'
+        '  "flights": [\n'
+        "    {\n"
+        '      "flight_no": "6E 2341 (IATA code space number)",\n'
+        '      "airline": "IndiGo",\n'
+        '      "from_code": "DEL (3-letter IATA)",\n'
+        '      "to_code": "BOM (3-letter IATA)",\n'
+        '      "date": "YYYY-MM-DD",\n'
+        '      "dep_time_raw": "HH:MM (24hr format)",\n'
+        '      "arr_time_raw": "HH:MM (24hr format)",\n'
+        '      "class": "Economy / Premium Economy / Business / First Class",\n'
+        '      "from_terminal": "T1 if visible",\n'
+        '      "to_terminal": "T2 if visible",\n'
+        '      "checkin_bag": "15 KG (1 Piece) / 20 KG (1 Piece) / 30 KG (1 Piece) / No Baggage etc.",\n'
+        '      "hand_bag": "7 KG (1 Piece) / 10 KG (1 Piece) / No Baggage"\n'
+        "    }\n"
+        "  ],\n"
+        '  "passengers": [\n'
+        "    {\n"
+        '      "title": "Mr / Mrs / Ms / Mstr / Dr",\n'
+        '      "name": "FULL NAME IN CAPS",\n'
+        '      "type": "Adult / Child / Infant",\n'
+        '      "seats": ["12A"],\n'
+        '      "passport": "passport number if visible",\n'
+        '      "dob": "DD Mon YYYY if visible",\n'
+        '      "doe": "DD Mon YYYY (passport expiry) if visible"\n'
+        "    }\n"
+        "  ]\n"
+        "}\n\n"
+        "RULES:\n"
+        "- Return ONLY the JSON. No markdown code fences, no commentary.\n"
+        "- If a field is not visible, use empty string \"\".\n"
+        "- For multiple flights (connecting), add multiple objects in the flights array.\n"
+        "- For multiple passengers, add multiple objects in the passengers array.\n"
+        "- Flight number format: IATA code + space + number (e.g. \"6E 2341\", \"AI 865\", \"SG 178\").\n"
+        "- Times must be 24-hour HH:MM format.\n"
+        "- Dates must be YYYY-MM-DD format.\n"
+        "- Fare amounts must be plain numbers without currency symbols or commas.\n"
+        "- Baggage format: \"XX KG (N Piece)\" or \"No Baggage\"."
+    )
+    return jsonify({"prompt": prompt})
+
+
+@app.route("/api/parse-ai-data", methods=["POST"])
+def parse_ai_data():
+    """Accept AI-extracted JSON and normalize it for the form auto-fill.
+
+    The front end sends the raw text the user pasted from ChatGPT / Gemini.
+    This endpoint strips markdown fences, parses the JSON, and validates
+    that the essential fields are present before returning them in the same
+    shape that applyExtractedData() on the client expects.
+    """
+    payload = request.get_json(silent=True) or {}
+    raw_text = (payload.get("ai_text") or "").strip()
+    if not raw_text:
+        return jsonify({"error": "No AI data provided. Paste the JSON output from ChatGPT/Gemini."}), 400
+
+    # Strip markdown code fences (```json ... ``` or ``` ... ```)
+    cleaned = re.sub(r"^```(?:json)?\s*\n?", "", raw_text, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\n?```\s*$", "", cleaned)
+    cleaned = cleaned.strip()
+
+    # Try to find JSON object in the text
+    json_match = re.search(r"\{[\s\S]*\}", cleaned)
+    if not json_match:
+        return jsonify({
+            "error": "Could not find valid JSON in the pasted text. "
+                     "Make sure you copy the complete JSON output from the AI."
+        }), 400
+
+    json_str = json_match.group(0)
+    try:
+        data = json.loads(json_str)
+    except json.JSONDecodeError:
+        # Repair invalid backslash escapes (e.g. \@, \., \_, etc. emitted by LLMs)
+        repaired = re.sub(r'\\([^"\\/bfnrtu])', r'\1', json_str)
+        try:
+            data = json.loads(repaired)
+        except json.JSONDecodeError as exc:
+            return jsonify({
+                "error": f"Invalid JSON: {exc}. Make sure the AI output is complete and properly formatted."
+            }), 400
+
+    if not isinstance(data, dict):
+        return jsonify({"error": "Expected a JSON object, not an array or primitive."}), 400
+
+    # Normalize and validate flights
+    flights = data.get("flights") or []
+    if not isinstance(flights, list):
+        flights = []
+    normalized_flights = []
+    for f in flights:
+        if not isinstance(f, dict):
+            continue
+        seg = {
+            "flight_no": str(f.get("flight_no") or "").strip(),
+            "airline": str(f.get("airline") or "").strip(),
+            "from_code": str(f.get("from_code") or "").strip().upper()[:3],
+            "to_code": str(f.get("to_code") or "").strip().upper()[:3],
+            "date": str(f.get("date") or "").strip(),
+            "dep_time_raw": str(f.get("dep_time_raw") or f.get("dep_time") or "").strip(),
+            "arr_time_raw": str(f.get("arr_time_raw") or f.get("arr_time") or "").strip(),
+            "class": str(f.get("class") or f.get("travel_class") or "Economy").strip(),
+            "from_terminal": str(f.get("from_terminal") or f.get("dep_terminal") or "").strip(),
+            "to_terminal": str(f.get("to_terminal") or f.get("arr_terminal") or "").strip(),
+            "checkin_bag": str(f.get("checkin_bag") or f.get("check_in_baggage") or "").strip(),
+            "hand_bag": str(f.get("hand_bag") or f.get("cabin_baggage") or f.get("hand_baggage") or "").strip(),
+            "segment_pnr": str(f.get("segment_pnr") or "").strip(),
+        }
+        # Normalize baggage labels
+        if seg["checkin_bag"]:
+            seg["checkin_bag"] = normalize_baggage_label(seg["checkin_bag"], is_checkin=True)
+        if seg["hand_bag"]:
+            seg["hand_bag"] = normalize_baggage_label(seg["hand_bag"], is_checkin=False)
+        # Normalize time format
+        for key in ("dep_time_raw", "arr_time_raw"):
+            seg[key] = normalize_time_token(seg[key])
+        # Normalize date
+        if seg["date"]:
+            seg["date"] = parse_date_str(seg["date"]) or seg["date"]
+        else:
+            seg["date"] = parse_date_str(str(data.get("booking_date") or "")) or datetime.now().strftime("%Y-%m-%d")
+        # Auto-detect airline from flight number
+        if seg["flight_no"] and not seg["airline"]:
+            seg["airline"] = AIRLINES.get(extract_airline_code(seg["flight_no"]), "")
+        normalized_flights.append(seg)
+
+    # Normalize passengers
+    passengers = data.get("passengers") or []
+    if not isinstance(passengers, list):
+        passengers = []
+    normalized_pax = []
+    for p in passengers:
+        if not isinstance(p, dict):
+            continue
+        raw_name = str(p.get("name") or "").strip().upper()
+        pax_title = str(p.get("title") or "Mr").strip()
+        if "/" in raw_name:
+            parts = [part.strip() for part in raw_name.split("/") if part.strip()]
+            if len(parts) == 2:
+                first_part = parts[1]
+                for t in ("MR", "MRS", "MS", "MSTR", "DR"):
+                    if first_part.endswith(" " + t):
+                        first_part = first_part[:-len(t)-1].strip()
+                        if not p.get("title"):
+                            pax_title = t.title()
+                raw_name = f"{first_part} {parts[0]}".strip()
+            else:
+                raw_name = raw_name.replace("/", " ").strip()
+
+        pax = {
+            "title": pax_title,
+            "name": raw_name,
+            "type": str(p.get("type") or p.get("pax_type") or "Adult").strip(),
+            "passport": str(p.get("passport") or "").strip(),
+            "dob": str(p.get("dob") or "").strip(),
+            "doe": str(p.get("doe") or "").strip(),
+        }
+        # Handle seats - AI may return string or array
+        seats = p.get("seats") or p.get("seat")
+        if isinstance(seats, list):
+            pax["seats"] = [str(s).strip() for s in seats]
+        elif seats:
+            pax["seats"] = [str(seats).strip()]
+        else:
+            pax["seats"] = []
+
+        normalized_pax.append(pax)
+
+    # Build normalized result
+    def safe_str(key, fallback=""):
+        val = data.get(key)
+        return str(val).strip() if val is not None and str(val).strip() else fallback
+
+    def safe_fare(key):
+        val = data.get(key)
+        if val is None or str(val).strip() == "":
+            return ""
+        cleaned = str(val).replace(",", "").replace("₹", "").replace("INR", "").replace("-", "").strip()
+        try:
+            return str(abs(float(cleaned)))
+        except ValueError:
+            return ""
+
+    result = {
+        "pnr": re.sub(r"[^A-Z0-9]", "", safe_str("pnr").upper()),
+        "booking_id": safe_str("booking_id"),
+        "booking_platform": safe_str("booking_platform"),
+        "booking_date": parse_date_str(safe_str("booking_date")) or safe_str("booking_date"),
+        "customer_email": safe_str("customer_email"),
+        "customer_phone": safe_str("customer_phone"),
+        "base_fare": safe_fare("base_fare"),
+        "taxes_fees": safe_fare("taxes_fees"),
+        "total_fare": safe_fare("total_fare"),
+        "discount": safe_fare("discount"),
+        "refund_status": safe_str("refund_status"),
+        "fare_type": safe_str("fare_type"),
+        "flights": normalized_flights,
+        "passengers": normalized_pax,
+    }
+
+    # Handle masked phone numbers (e.g. +91-87******48) or phone numbers with < 7 digits
+    phone_raw = result["customer_phone"]
+    digits = re.sub(r"\D", "", phone_raw)
+    if not phone_raw or "*" in phone_raw or len(digits) < 7:
+        result["customer_phone"] = COMPANY.get("phone", "+91 9876543210")
+
+    # Handle masked emails (e.g. a********m@g***l.com) or invalid emails
+    email_raw = result["customer_email"]
+    if not email_raw or "*" in email_raw or "@" not in email_raw or "." not in email_raw:
+        if result["passengers"] and result["passengers"][0].get("name"):
+            clean_name = re.sub(r"[^a-zA-Z]+", ".", result["passengers"][0]["name"].lower()).strip(".")
+            result["customer_email"] = f"{clean_name}@gmail.com" if clean_name else COMPANY.get("email", "support@traveleticket.com")
+        else:
+            result["customer_email"] = COMPANY.get("email", "support@traveleticket.com")
+
+    # If total_fare is present but base_fare is missing, map total_fare into base_fare so the amount is never lost
+    has_total = result["total_fare"] and result["total_fare"] not in ("0", "0.0")
+    has_base = result["base_fare"] and result["base_fare"] not in ("0", "0.0")
+    if has_total and not has_base:
+        result["base_fare"] = result["total_fare"]
+        result["taxes_fees"] = "0"
+    elif not result["base_fare"]:
+        result["base_fare"] = "0"
+
+    if not result["taxes_fees"]:
+        result["taxes_fees"] = "0"
+
+    if not result["total_fare"] or result["total_fare"] in ("0", "0.0"):
+        try:
+            bf = float(result["base_fare"] or 0)
+            tf = float(result["taxes_fees"] or 0)
+            result["total_fare"] = str(round(bf + tf, 2))
+        except Exception:
+            result["total_fare"] = result["base_fare"] or "0"
+
+    # Auto-generate barcode from PNR
+    if result["pnr"]:
+        bc_path, bc_data = generate_code128_barcode(result["pnr"])
+        if bc_path:
+            result["barcode_token"] = bc_path
+            result["barcode_data"] = bc_data
+
+    log.info("AI data parsed: pnr=%s, %d flight(s), %d passenger(s)",
+             result["pnr"], len(result["flights"]), len(result["passengers"]))
+
+    return jsonify(result)
+
+
+if CSRF_AVAILABLE:
+    csrf.exempt(parse_ai_data)
+
+
 @app.route("/api/test-extract", methods=["GET"])
 def test_extract():
-    return jsonify({"error": "PDF extraction is temporarily disabled. Please fill the form manually."}), 410
+    return jsonify({"status": "ready", "message": "PDF extraction active."})
+
+
+@app.route("/api/load-preset", methods=["GET"])
+def load_preset():
+    filename = secure_filename(request.args.get("file", "new12.pdf"))
+    allowed_presets = {"new12.pdf", "new13.pdf", "new14.pdf", "new15.pdf"}
+    if filename not in allowed_presets:
+        return jsonify({"error": "Invalid preset file"}), 400
+
+    file_path = os.path.join(os.path.dirname(__file__), filename)
+    if not os.path.exists(file_path):
+        return jsonify({"error": f"File {filename} not found"}), 404
+
+    try:
+        import pdfplumber
+        with pdfplumber.open(file_path) as pdf:
+            pages = [page.extract_text() or "" for page in pdf.pages]
+            pages_words = [page.extract_words() or [] for page in pdf.pages]
+        text = "\n".join(pages).strip()
+        extracted = extract_ticket_fields(text, filename=filename, pages_words=pages_words)
+        return jsonify(extracted)
+    except Exception as exc:
+        log.exception("Error extracting preset %s: %s", filename, exc)
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/download-sample/<filename>", methods=["GET"])
+def download_sample(filename):
+    safe_name = secure_filename(filename)
+    allowed_downloads = {
+        "generated_new12.pdf", "generated_new13.pdf", "generated_new14.pdf", "generated_new15.pdf",
+        "new12.pdf", "new13.pdf", "new14.pdf", "new15.pdf"
+    }
+    if safe_name in allowed_downloads:
+        filepath = os.path.join(os.path.dirname(__file__), safe_name)
+        if os.path.exists(filepath):
+            return send_file(filepath, as_attachment=True, download_name=safe_name, mimetype="application/pdf")
+    return jsonify({"error": "File not found"}), 404
 
 
 MAX_BARCODE_BYTES = 4 * 1024 * 1024
@@ -1512,9 +1964,13 @@ def generate_ticket():
     
     # ── Agency Selection & Contact ─────────────────
     agency_id = request.form.get("agency_id", DEFAULT_AGENCY_ID).strip()
-    selected_agency = AGENCIES.get(agency_id, COMPANY)
+    selected_agency = dict(AGENCIES.get(agency_id, COMPANY))
     agency_phone = request.form.get("agency_phone", "").strip() or selected_agency.get("phone", "")
     agency_email = request.form.get("agency_email", "").strip() or selected_agency.get("email", "")
+    if agency_phone:
+        selected_agency["phone"] = agency_phone
+    if agency_email:
+        selected_agency["email"] = agency_email
     
     # ── Custom Contact ─────────────────────────────
     customer_phone = request.form.get("customer_phone", "").strip()
@@ -1746,8 +2202,16 @@ def generate_ticket():
         pax_title = request.form.get(f"{prefix}title", "").strip()
         pax_type = request.form.get(f"{prefix}type", "Adult").strip() or "Adult"
 
+        pax_raw_name = request.form.get(f"{prefix}name", "").strip()
+        if "/" in pax_raw_name:
+            parts = [p.strip() for p in pax_raw_name.split("/") if p.strip()]
+            if len(parts) == 2:
+                pax_raw_name = f"{parts[1]} {parts[0]}"
+            else:
+                pax_raw_name = pax_raw_name.replace("/", " ")
+
         passengers.append({
-            "name": request.form.get(f"{prefix}name", ""),
+            "name": pax_raw_name,
             "title": pax_title if pax_title in PASSENGER_TITLES else "",
             "pax_type": pax_type if pax_type in PASSENGER_TYPES else "Adult",
             "passport": request.form.get(f"{prefix}passport", ""),
@@ -1783,7 +2247,7 @@ def generate_ticket():
 
     errors = (
         validate_booking(request.form)
-        + validate_flights(flights)
+        + validate_flights(flights, trip_type=trip_type)
         + validate_passengers(passengers)
         + fare_errors
     )
@@ -1824,8 +2288,6 @@ def generate_ticket():
     contact_parts = []
     if agency_email:
         contact_parts.append(agency_email)
-    if agency_phone:
-        contact_parts.append(agency_phone)
     contact_line = "  ·  ".join(contact_parts)
 
     draw_footer(

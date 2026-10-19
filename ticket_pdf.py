@@ -264,20 +264,27 @@ def draw_header(t, *, company, pnr, booking_id, status, show_agency=True):
     # to clear the PNR block; a long trading name should not run into it.
     wordmark = company["name"].upper() if show_agency else "E-TICKET"
     brand_x = (MARGIN + size + 2.2 * MM) if show_agency else MARGIN
-    brand_size = 16.5
+    brand_size = 16.0
     room = (PAGE_W - MARGIN - 34 * MM) - brand_x
     while brand_size > 11 and t.c.stringWidth(wordmark, FONT_BOLD, brand_size) > room:
         brand_size -= 0.25
     t.text(brand_x, t.at(BRAND_BASE_MM), wordmark, size=brand_size, font=FONT_BOLD, color=INK)
 
-    booking_y = t.at(BOOKING_BASE_MM)
+    # Phone number right below the agency name as requested
+    phone = (company.get("phone") or "").strip()
+    if show_agency and phone:
+        phone_y = t.at(BRAND_BASE_MM + 4.3)
+        _phone_icon(t, brand_x + 1.8, phone_y + 2.4, size=5.2, color=MUTED)
+        t.text(brand_x + 5.2, phone_y, phone, size=8.5, font=FONT_BOLD, color=MUTED)
+
+    booking_y = t.at(BOOKING_BASE_MM + 1.0) if (show_agency and phone) else t.at(BOOKING_BASE_MM)
     # Without the agency the wordmark already says E-TICKET, so the line below
     # carries the reference alone rather than repeating the word.
     if show_agency:
         subtitle = "E-ticket" + (f"  \u00b7  Booking {booking_id}" if booking_id else "")
     else:
         subtitle = f"Booking {booking_id}" if booking_id else "E-ticket"
-    t.text(MARGIN, booking_y, subtitle, size=9, color=MUTED)
+    t.text(MARGIN, booking_y, subtitle, size=8.8, color=MUTED)
 
     # The status has no counterpart on the reference, so it rides the booking
     # line rather than claiming a row and shifting everything below it.
@@ -713,20 +720,4 @@ def draw_footer(t, *, company, issued, contact_line, terms, show_agency=True):
     if contact_line and contact_line.strip():
         t.y -= FOOTER_LINE_MM * MM
         cleaned = contact_line.strip()
-        if "·" in cleaned:
-            parts = [p.strip() for p in cleaned.split("·")]
-            email_part = parts[0] if "@" in parts[0] else ""
-            phone_part = parts[1] if len(parts) > 1 else parts[0]
-            if email_part and phone_part:
-                t.text(MARGIN, t.y, f"{email_part}  ·  ", size=8, color=FAINT)
-                email_w = t.c.stringWidth(f"{email_part}  ·  ", FONT, 8)
-                _phone_icon(t, MARGIN + email_w + 2.5, t.y + 2.6, size=5.5, color=FAINT)
-                t.text(MARGIN + email_w + 6.8, t.y, phone_part, size=8, color=FAINT)
-            else:
-                _phone_icon(t, MARGIN + 2.5, t.y + 2.6, size=5.5, color=FAINT)
-                t.text(MARGIN + 6.8, t.y, cleaned, size=8, color=FAINT)
-        elif any(char.isdigit() for char in cleaned):
-            _phone_icon(t, MARGIN + 2.5, t.y + 2.6, size=5.5, color=FAINT)
-            t.text(MARGIN + 6.8, t.y, cleaned, size=8, color=FAINT)
-        else:
-            t.text(MARGIN, t.y, cleaned, size=8, color=FAINT)
+        t.text(MARGIN, t.y, cleaned, size=8, color=FAINT)

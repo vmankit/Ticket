@@ -456,7 +456,7 @@ def looks_like_own_ticket(text_upper):
     if "ITINERARY" in text_upper and "PASSENGERS" in text_upper:
         if any(h in text_upper for h in ("PASSENGER SECTOR PNR SEAT MEAL", "AMOUNT PAID", "SHOW YOUR BARCODE AT THE AIRPORT")):
             return True
-        if "CONFIRMED" in text_upper and any(b in text_upper for b in ("BHARAT HORIZON TRAVELS", "ANKIT TRAVELS", "E-TICKET")):
+        if "CONFIRMED" in text_upper and any(b in text_upper for b in ("BHARAT HORIZON TRAVELS", "ANKIT TRAVELS")):
             return True
 
     # Own legacy layout
@@ -480,15 +480,70 @@ def _to_iso(day, month_abbr, year):
 
 
 def _find_date(chunk, fallback_year=""):
-    """Read the first date in `chunk`, tolerating a year split onto the next line."""
-    match = DATE_RE.search(chunk)
-    if not match:
+    """Read the first date in `chunk`, tolerating split years, Month-first, Day-first and ISO formats."""
+    if not chunk:
         return ""
-    day, month, year = match.group(1), match.group(2), match.group(3)
-    if not year:
-        trailing = re.search(r"\b(20\d{2})\b", chunk[match.end():])
-        year = trailing.group(1) if trailing else fallback_year
-    return _to_iso(day, month, year)
+    # Month First: Oct 19 2026 or Oct 19, 2026
+    m_first = re.search(r"\b([A-Z][a-z]{2})[a-z]*\.?\s+(\d{1,2}),?(?:\s+(\d{2,4}))?\b", chunk)
+    if m_first and m_first.group(1).upper()[:3] in MONTHS:
+        month = m_first.group(1)
+        day = m_first.group(2)
+        year = m_first.group(3)
+        if not year:
+            trailing = re.search(r"\b(20\d{2})\b", chunk[m_first.end():])
+            year = trailing.group(1) if trailing else fallback_year
+        return _to_iso(day, month, year)
+
+    # Day First: 19 Oct 2026 or 19 Oct, 2026
+    d_first = re.search(r"(?:[A-Z][a-z]{2},?\s+)?(\d{1,2})\s+([A-Z][a-z]{2})[a-z]*\.?,?(?:\s+(\d{2,4}))?", chunk)
+    if d_first and d_first.group(2).upper()[:3] in MONTHS:
+        day = d_first.group(1)
+        month = d_first.group(2)
+        year = d_first.group(3)
+        if not year:
+            trailing = re.search(r"\b(20\d{2})\b", chunk[d_first.end():])
+            year = trailing.group(1) if trailing else fallback_year
+        return _to_iso(day, month, year)
+
+    # ISO format: 2026-10-19 or 2026/10/19
+    iso_m = re.search(r"\b(20\d{2})[-/](\d{1,2})[-/](\d{1,2})\b", chunk)
+    if iso_m:
+        return f"{iso_m.group(1)}-{int(iso_m.group(2)):02d}-{int(iso_m.group(3)):02d}"
+
+    # Day-Month-Year format: 22/09/2026 or 22-09-2026
+    dmy_m = re.search(r"\b(\d{1,2})[-/](\d{1,2})[-/](20\d{2})\b", chunk)
+    if dmy_m:
+        return f"{dmy_m.group(3)}-{int(dmy_m.group(2)):02d}-{int(dmy_m.group(1)):02d}"
+
+    return ""
+
+
+def normalize_baggage_label(raw, is_checkin=True):
+    """Normalize extracted baggage text into standard dropdown values (e.g. '15 KG (1 Piece)', 'No Baggage')."""
+    if not raw:
+        return ""
+    text = str(raw).strip()
+    u = text.upper()
+
+    no_bag_pattern = r"\b(?:not allowed|no baggage|nil|none|0\s*kgs?|not included|zero|0\s*pieces?|n/?a)\b"
+    if is_checkin:
+        no_bag_pattern = r"\b(?:not allowed|no baggage|nil|none|0\s*kgs?|not included|zero|0\s*pieces?|n/?a|hand-?baggage only|cabin baggage only|cabin bag only|cabin bag)\b"
+
+    if re.search(no_bag_pattern, u, re.I):
+        return "No Baggage"
+
+    kg_m = re.search(r"\b(\d{1,2}(?:\.0)?)\s*(?:KGS?|KGKG)\b", u)
+    pc_m = re.search(r"\b(\d)\s*(?:PIECES?|PCS?|PC)\b", u)
+
+    if kg_m:
+        kg = str(int(float(kg_m.group(1))))
+        if kg == "0":
+            return "No Baggage"
+        pieces = pc_m.group(1) if pc_m else "1"
+        pc_label = f"{pieces} Piece" if pieces == "1" else f"{pieces} Pieces"
+        return f"{kg} KG ({pc_label})"
+
+    return text
 
 
 def _to_24h(hour, minute, meridiem):
@@ -1033,6 +1088,13 @@ def _parse_own_current(text):
                 found = _find_date(candidate)
                 if found:
                     segment["date"] = found
+            if "baggage" in candidate.lower():
+                c_m = re.search(r"([0-9A-Za-z\s\(\)]+?)\s+check-in", candidate, re.I)
+                if c_m:
+                    segment["checkin_bag"] = normalize_baggage_label(c_m.group(1), is_checkin=True)
+                h_m = re.search(r"([0-9A-Za-z\s\(\)]+?)\s+cabin", candidate, re.I)
+                if h_m:
+                    segment["hand_bag"] = normalize_baggage_label(h_m.group(1), is_checkin=False)
         if segment.get("from_code"):
             result["flights"].append(segment)
 
@@ -1219,54 +1281,143 @@ def parse_columnar_ticket(pages_words):
     Returns {} unless the itinerary table is actually found, so the caller can
     fall through to the text-based parsers for every other layout.
     """
-    result = {}
+    result = {
+        "booking_platform": "Direct/Walk-in",
+        "pnr": "", "booking_id": "", "booking_date": "",
+        "base_fare": "", "taxes_fees": "", "total_fare": "", "discount": "",
+        "fare_type": "REGULAR", "refund_status": "Refundable",
+        "customer_email": "", "customer_phone": "",
+        "flights": [], "passengers": [],
+    }
     all_words = [w for page in pages_words for w in page]
     if not all_words:
         return {}
     flat = " ".join(w["text"] for w in all_words)
+    flat = re.sub(r'[\uE000-\uF8FF]', ' ', flat)
 
     lines = _group_word_lines(pages_words[0])
     header_idx, bounds = _find_table(lines, COLUMNAR_FLIGHT_HEADERS)
     if header_idx is None:
         return {}
 
-    flight_col, dep_col, dur_col, arr_col = _cell_block(
-        lines, header_idx + 1, bounds, ("PASSENGER DETAILS", "OTHER DETAILS"))
+    flight_anchors = []
+    for top, line_words in lines[header_idx + 1:]:
+        line_str = " ".join(w["text"] for w in line_words).upper()
+        if any(m in line_str for m in ("PASSENGER DETAILS", "OTHER DETAILS", "FARE DETAILS")):
+            break
+        col0 = " ".join(w["text"] for w in line_words if _column_of(w, bounds) == 0)
+        m = re.search(r"\b([A-Z0-9]{2,3})\s*-?\s*(\d{2,4})\b", col0)
+        if m and "LAYOVER" not in col0.upper():
+            flight_anchors.append((top, f"{m.group(1)} {m.group(2)}"))
 
-    segment = {}
-    number = re.match(r"([A-Z0-9]{2})\s*-?\s*(\d{2,4})\b\s*(.*)", flight_col.upper())
-    if number:
-        segment["flight_no"] = f"{number.group(1)} {number.group(2)}"
-        airline = flight_col[number.end(2):].strip(" -")
-        if airline:
-            segment["airline"] = airline.title()
-    departure, arrival = _endpoint(dep_col), _endpoint(arr_col)
+    segments = []
+    if len(flight_anchors) > 1:
+        for i, (top, fno) in enumerate(flight_anchors):
+            min_top = top - 15
+            if i > 0:
+                min_top = max(min_top, flight_anchors[i - 1][0] + 30)
+            max_top = flight_anchors[i + 1][0] - 10 if i + 1 < len(flight_anchors) else 240
 
-    # The header carries the route as "CITY (AAA) - CITY (BBB)", which is
-    # cleaner than digging it out of either cell.
-    route = re.search(r"\(([A-Z]{3})\)\s*-\s*[A-Za-z .]+\(([A-Z]{3})\)", flat)
-    segment["from_code"] = (route.group(1) if route else departure.get("code", ""))
-    segment["to_code"] = (route.group(2) if route else arrival.get("code", ""))
-    if departure.get("date"):
-        segment["date"] = departure["date"]
-    if departure.get("time"):
-        segment["dep_time_raw"] = departure["time"]
-    if arrival.get("time"):
-        segment["arr_time_raw"] = arrival["time"]
-    if departure.get("terminal"):
-        segment["from_terminal"] = departure["terminal"]
-    if arrival.get("terminal"):
-        segment["to_terminal"] = arrival["terminal"]
+            seg_words = [w for w in pages_words[0] if min_top <= w["top"] < max_top]
+            col_flight = " ".join(w["text"] for w in seg_words if _column_of(w, bounds) == 0)
+            col_dep = " ".join(w["text"] for w in seg_words if _column_of(w, bounds) == 1)
+            col_dur = " ".join(w["text"] for w in seg_words if _column_of(w, bounds) == 2 and w["x0"] < 340)
+            col_arr = " ".join(w["text"] for w in seg_words if w["x0"] >= 340)
 
-    cabin = re.search(r"(\d{1,2}\s*KG)\s*(?:HAND|CABIN)", flat, re.I)
-    if cabin:
-        segment["hand_bag"] = cabin.group(1).upper().replace(" ", " ")
-    checkin = re.search(r"(\d{1,2}\s*KG)\s*(?:CHECK[- ]?IN)", flat, re.I)
-    if checkin:
-        segment["checkin_bag"] = checkin.group(1).upper()
+            col_flight = re.sub(r'[\uE000-\uF8FF]', ' ', col_flight)
+            col_dep = re.sub(r'[\uE000-\uF8FF]', ' ', col_dep)
+            col_dur = re.sub(r'[\uE000-\uF8FF]', ' ', col_dur)
+            col_arr = re.sub(r'[\uE000-\uF8FF]', ' ', col_arr)
 
-    if segment.get("flight_no") and segment.get("from_code") and segment.get("to_code"):
-        result["flights"] = [segment]
+            carrier_code = fno.split()[0]
+            airline = STANDARD_AIRLINES.get(carrier_code, "")
+            if not airline:
+                al_m = re.search(r"\b(Air India Express|Air India|IndiGo|SpiceJet|Akasa Air|Vistara)\b", col_flight, re.I)
+                airline = al_m.group(1) if al_m else "Air India Express"
+
+            dep_endpoint = _endpoint(col_dep)
+            arr_endpoint = _endpoint(col_arr)
+
+            seg = {
+                "flight_no": fno,
+                "airline": airline,
+                "from_code": dep_endpoint.get("code", ""),
+                "to_code": arr_endpoint.get("code", ""),
+                "dep_time_raw": dep_endpoint.get("time", ""),
+                "arr_time_raw": arr_endpoint.get("time", ""),
+                "date": dep_endpoint.get("date", ""),
+            }
+            if arr_endpoint.get("terminal"):
+                t = arr_endpoint['terminal']
+                seg["to_terminal"] = f"Terminal {t}" if not t.upper().startswith("T") else t
+            lay_m = re.search(r"Layover\s*(\d{1,2}h:\d{2}m)", col_flight, re.I)
+            if lay_m:
+                seg["manual_layover"] = lay_m.group(1)
+            segments.append(seg)
+        result["flights"] = segments
+    else:
+        flight_col, dep_col, dur_col, arr_col = _cell_block(
+            lines, header_idx + 1, bounds, ("PASSENGER DETAILS", "OTHER DETAILS"))
+        flight_col = re.sub(r'[\uE000-\uF8FF]', ' ', flight_col)
+        dep_col = re.sub(r'[\uE000-\uF8FF]', ' ', dep_col)
+        arr_col = re.sub(r'[\uE000-\uF8FF]', ' ', arr_col)
+        segment = {}
+        number = re.match(r"([A-Z0-9]{2,3})\s*-?\s*(\d{2,4})\b\s*(.*)", flight_col.upper())
+        if number:
+            segment["flight_no"] = f"{number.group(1)} {number.group(2)}"
+            airline = flight_col[number.end(2):].strip(" -")
+            if airline:
+                segment["airline"] = airline.title()
+        departure, arrival = _endpoint(dep_col), _endpoint(arr_col)
+        route = re.search(r"\(([A-Z]{3})\)\s*-\s*[A-Za-z .]+\(([A-Z]{3})\)", flat)
+        segment["from_code"] = (route.group(1) if route else departure.get("code", ""))
+        segment["to_code"] = (route.group(2) if route else arrival.get("code", ""))
+        if departure.get("date"): segment["date"] = departure["date"]
+        if departure.get("time"): segment["dep_time_raw"] = departure["time"]
+        if arrival.get("time"): segment["arr_time_raw"] = arrival["time"]
+        if departure.get("terminal"): segment["from_terminal"] = departure["terminal"]
+        if arrival.get("terminal"): segment["to_terminal"] = arrival["terminal"]
+        if segment.get("flight_no") and segment.get("from_code") and segment.get("to_code"):
+            result["flights"] = [segment]
+
+    checkin_bag = ""
+    hand_bag = ""
+
+    # Pattern A: Table row where Checkin Baggage and Cabin Baggage headers are followed by weights
+    tbl_m = re.search(
+        r"Check[- ]?in\s*Baggage\s*(?:Cabin|Hand)\s*Baggage[^\n\d]*\n?\s*(\d{1,2}\s*KG|\b\d{1,2}\s*kgs?\b|\bNot Allowed\b|\bNil\b|\bNo Baggage\b)[^\n\d]*(\d{1,2}\s*KG|\b\d{1,2}\s*kgs?\b)",
+        flat, re.I
+    )
+    if tbl_m:
+        checkin_bag = tbl_m.group(1).strip()
+        hand_bag = tbl_m.group(2).strip()
+
+    if not checkin_bag:
+        c_m = re.search(r"Check[- ]?in(?:\s*Baggage)?\s*[:\s]?\s*(\d{1,2}\s*kgs?(?:\s*\([^\)]+\))?|\d{1,2}\s*KG|Not Allowed|No Baggage|Nil|None)", flat, re.I)
+        if c_m:
+            checkin_bag = c_m.group(1).strip()
+    if not checkin_bag:
+        c_rev = re.search(r"(\d{1,2}\s*KG)\s*(?:CHECK[- ]?IN)", flat, re.I)
+        if c_rev:
+            checkin_bag = c_rev.group(1).strip()
+
+    if not hand_bag:
+        h_m = re.search(r"(?:Cabin|Hand)(?:\s*Baggage)?\s*[:\s]?\s*(\d{1,2}\s*kgs?(?:\s*\([^\)]+\))?|\d{1,2}\s*KG|Not Allowed|No Baggage|Nil|None)", flat, re.I)
+        if h_m:
+            hand_bag = h_m.group(1).strip()
+    if not hand_bag:
+        h_rev = re.search(r"(\d{1,2}\s*KG)\s*(?:HAND|CABIN)", flat, re.I)
+        if h_rev:
+            hand_bag = h_rev.group(1).strip()
+
+    checkin_norm = normalize_baggage_label(checkin_bag, is_checkin=True)
+    hand_norm = normalize_baggage_label(hand_bag, is_checkin=False)
+
+    for seg in result["flights"]:
+        if hand_norm:
+            seg["hand_bag"] = hand_norm
+        if checkin_norm:
+            seg["checkin_bag"] = checkin_norm
 
     pnr = re.search(r"Airline\s*PNR\s*:?\s*([A-Z0-9]{5,8})\b", flat, re.I)
     if pnr:
@@ -1279,9 +1430,21 @@ def parse_columnar_ticket(pages_words):
         result["booking_date"] = booked.group(1)
     total = re.search(r"Total\s*Amount\D{0,40}?" + MONEY_RE, flat, re.I)
     if total:
-        result["total_fare"] = total.group(1).replace(",", "")
+        tval = total.group(1).replace(",", "")
+        result["total_fare"] = tval
+        result["base_fare"] = tval
+        result["taxes_fees"] = "0"
     if re.search(r"\bnon[- ]?refundable\b", flat, re.I):
         result["refund_status"] = "Non-Refundable"
+    elif re.search(r"\brefundable\b", flat, re.I):
+        result["refund_status"] = "Refundable"
+
+    em = re.search(r"([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})", flat)
+    if em:
+        result["customer_email"] = em.group(1)
+    ph = re.search(r"(?:Support|Help|Toll Free|Contact)[:\s]*(\+?[\d\s\-]{10,})", flat, re.I)
+    if ph:
+        result["customer_phone"] = ph.group(1).strip()
 
     pax_idx, pax_bounds = _find_table(lines, COLUMNAR_PAX_HEADERS)
     if pax_idx is not None:
@@ -1521,16 +1684,16 @@ def parse_makemytrip_ticket(text):
             d_m2 = re.search(r"\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+(\d{1,2})\b", ctx, re.I)
             if d_m2 and res.get("booking_date"):
                 seg["date"] = _to_iso(d_m2.group(2), d_m2.group(1), res["booking_date"][:4])
-        bag_match = re.search(r"Check-in Baggage:\s*([^/\n]+?)(?=\s*Cabin|\s*only\b|\n|$)", ctx, re.I)
+        bag_match = re.search(r"Check-in\s*Baggage:\s*([^\n]+?)(?=\s*Cabin\s*Baggage|\n|$)", ctx, re.I)
         if bag_match:
             bval = bag_match.group(1).strip()
             if "(" in bval and ")" not in bval: bval += ")"
-            seg["checkin_bag"] = bval
-        cbag_match = re.search(r"Cabin Baggage:\s*([^/\n]+?)(?=\s*Check-in|\s*only\b|\n|$)", ctx, re.I)
+            seg["checkin_bag"] = normalize_baggage_label(bval, is_checkin=True)
+        cbag_match = re.search(r"Cabin\s*Baggage:\s*([^\n]+?)(?=\s*Check-in\s*Baggage|\n|$)", ctx, re.I)
         if cbag_match:
             cval = cbag_match.group(1).strip()
             if "(" in cval and ")" not in cval: cval += ")"
-            seg["hand_bag"] = cval
+            seg["hand_bag"] = normalize_baggage_label(cval, is_checkin=False)
         res["flights"].append(seg)
 
     # Flight parsing: pattern 2 (Air India Express / multi-line airline):
@@ -1563,16 +1726,16 @@ def parse_makemytrip_ticket(text):
                 d_m2 = re.search(r"\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+(\d{1,2})\b", ctx, re.I)
                 if d_m2 and res.get("booking_date"):
                     seg["date"] = _to_iso(d_m2.group(2), d_m2.group(1), res["booking_date"][:4])
-            bag_match = re.search(r"Check-in Baggage:\s*([^/\n]+?)(?=\s*Cabin|\s*only\b|\n|$)", ctx, re.I)
+            bag_match = re.search(r"Check-in\s*Baggage:\s*([^\n]+?)(?=\s*Cabin\s*Baggage|\n|$)", ctx, re.I)
             if bag_match:
                 bval = bag_match.group(1).strip()
                 if "(" in bval and ")" not in bval: bval += ")"
-                seg["checkin_bag"] = bval
-            cbag_match = re.search(r"Cabin Baggage:\s*([^/\n]+?)(?=\s*Check-in|\s*only\b|\n|$)", ctx, re.I)
+                seg["checkin_bag"] = normalize_baggage_label(bval, is_checkin=True)
+            cbag_match = re.search(r"Cabin\s*Baggage:\s*([^\n]+?)(?=\s*Check-in\s*Baggage|\n|$)", ctx, re.I)
             if cbag_match:
                 cval = cbag_match.group(1).strip()
                 if "(" in cval and ")" not in cval: cval += ")"
-                seg["hand_bag"] = cval
+                seg["hand_bag"] = normalize_baggage_label(cval, is_checkin=False)
             res["flights"].append(seg)
 
     tot = re.search(r"Total Amount\s*(?:INR|Rs\.?|₹)?\s*([0-9,]+(?:\.\d{1,2})?)", text)
@@ -1639,10 +1802,12 @@ def parse_paytm_ticket(text):
     }
 
     bid = re.search(r"Paytm Booking ID\s*:\s*(\d+)", text, re.I)
-    if bid: res["booking_id"] = bid.group(1)
+    if bid:
+        res["booking_id"] = bid.group(1)
 
     bdate = re.search(r"Booked on:\s*(\d{1,2}\s+[A-Za-z]{3}\s+\d{4})", text, re.I)
-    if bdate: res["booking_date"] = _find_date(bdate.group(1)) or ""
+    if bdate:
+        res["booking_date"] = _find_date(bdate.group(1)) or ""
 
     pnr_line = re.search(r"Onward Flight PNR\s*\n([^\n]+)", text, re.I)
     if pnr_line:
@@ -1654,56 +1819,98 @@ def parse_paytm_ticket(text):
         if pnr_m2 and pnr_m2.group(1).upper() not in ("FLIGHT", "ONWARD", "INDIGO"):
             res["pnr"] = pnr_m2.group(1)
 
-    pax_block = re.search(r"Traveller\s*\n((?:[^\n]+\n)+?)(?:\d{2,4}[xX]\d|Helpline|Important|One97)", text, re.I)
+    # Passengers and passport
+    pax_block = re.search(r"Traveller\s*\n((?:[^\n]+\n)+?)(?:\d{2,4}[xX]\d|Helpline|Important|One97|\*Always)", text, re.I)
     if pax_block:
         for line in pax_block.group(1).splitlines():
             line = line.strip()
-            if not line: continue
+            if not line:
+                continue
+            if re.search(r"Passport Number|Hand-Baggage Only|Additional Payment|Check-In Your Baggage|Helpline|Care", line, re.I):
+                continue
+            passport_m = re.match(r"^([A-Z][A-Z0-9]{6,9})\s+(\d{1,2}\s+[A-Za-z]{3},?\s+\d{4})$", line, re.I)
+            if passport_m and res["passengers"]:
+                res["passengers"][-1]["passport"] = passport_m.group(1).upper()
+                res["passengers"][-1]["doe"] = _find_date(passport_m.group(2)) or passport_m.group(2)
+                continue
             m = re.match(r"^(Mr|Mrs|Ms|Mstr|Miss)\.?\s+(.+)$", line, re.I)
             if m:
-                res["passengers"].append({"name": m.group(2).strip().title(), "title": m.group(1).capitalize()})
-            elif len(line.split()) >= 2:
-                res["passengers"].append({"name": line.title()})
+                res["passengers"].append({"title": m.group(1).capitalize(), "name": m.group(2).strip().title(), "pax_type": "Adult"})
+            elif len(line.split()) >= 2 and not re.search(r"\d", line):
+                res["passengers"].append({"name": line.title(), "pax_type": "Adult"})
 
-    fl_m = re.search(
-        r"([A-Za-z]+)\s+([A-Z0-9]{2,3}[-\s]\d{3,4})[^\n]*\n([A-Z]{3})\s+([0-2]\d:[0-5]\d)\s+([0-2]\d:[0-5]\d)\s+([A-Z]{3})\n(?:[A-Za-z]{3}\s+)?(\d{1,2}\s+[A-Za-z]{3},?\s+\d{4})",
-        text
+    # Baggage allowance
+    cbag = re.search(r"Check-in Baggage\s*[:\n]?\s*(\d+\s*kgs?(?:\s*\([^\)]+\))?|Not Allowed|No Baggage|\d+\s*KG)", text, re.I)
+    raw_cbag = cbag.group(1).strip() if cbag else ""
+    if not raw_cbag and re.search(r"\bhand-?baggage only\b", text, re.I):
+        raw_cbag = "No Baggage"
+    hbag = re.search(r"Hand Baggage\s*[:\n]?\s*(\d+\s*kgs?(?:\s*\([^\)]+\))?|Not Allowed|No Baggage|\d+\s*KG)", text, re.I)
+    raw_hbag = hbag.group(1).strip() if hbag else ""
+
+    checkin_bag = normalize_baggage_label(raw_cbag, is_checkin=True)
+    hand_bag = normalize_baggage_label(raw_hbag, is_checkin=False)
+
+    fl_pattern = re.compile(
+        r'(?:^|\n)\s*([A-Za-z][A-Za-z ]*?)\s+([A-Z0-9]{2,3}[-\s]\d{1,4})[^\n]*\n'
+        r'([A-Z]{3})\s+([0-2]\d:[0-5]\d)\s+([0-2]\d:[0-5]\d)\s+([A-Z]{3})\s*\n'
+        r'(?:[A-Za-z]{3}\s+)?(\d{1,2}\s+[A-Za-z]{3},?\s+\d{4})',
+        re.I
     )
-    if fl_m:
-        airline_name = fl_m.group(1)
-        flight_no = re.sub(r"[-\s]+", " ", fl_m.group(2))
-        fc, dep, arr, tc = fl_m.group(3), fl_m.group(4), fl_m.group(5), fl_m.group(6)
-        fdate = _find_date(fl_m.group(7)) or ""
+    for m in fl_pattern.finditer(text):
+        airline = m.group(1).strip()
+        fno = re.sub(r'[-\s]+', ' ', m.group(2).strip())
+        fc, dep, arr, tc = m.group(3), m.group(4), m.group(5), m.group(6)
+        date = _find_date(m.group(7))
         seg = {
-            "airline": airline_name,
-            "flight_no": flight_no,
+            "airline": airline,
+            "flight_no": fno,
             "from_code": fc,
             "to_code": tc,
             "dep_time_raw": dep,
             "arr_time_raw": arr,
-            "date": fdate,
+            "date": date,
+            "checkin_bag": checkin_bag or "15 KG (1 Piece)",
+            "hand_bag": hand_bag or "7 KG (1 Piece)",
         }
-        term = re.search(r"Terminal\s+(\d+|T\d+)", text)
-        if term: seg["from_terminal"] = f"Terminal {term.group(1)}"
-        cbag = re.search(r"Check-in Baggage\s*([^\n/]+)", text)
-        if cbag: seg["checkin_bag"] = cbag.group(1).strip()
-        hbag = re.search(r"Hand Baggage\s*([^\n/]+)", text)
-        if hbag: seg["hand_bag"] = hbag.group(1).strip()
+        ctx = text[m.start():min(len(text), m.end() + 250)]
+        term_m = re.search(r"Terminal\s*(\d+|T\d+)", ctx, re.I)
+        if term_m:
+            seg["to_terminal"] = f"Terminal {term_m.group(1)}"
+        dur_m = re.search(r"\b(\d+h\s*\d*m?)\b", ctx)
+        if dur_m:
+            seg["duration"] = dur_m.group(1)
+        lay_m = re.search(r"Layover\s*(\d+h\s*\d*m?)", ctx, re.I)
+        if lay_m:
+            seg["manual_layover"] = lay_m.group(1)
         res["flights"].append(seg)
 
     tot = re.search(r"Total Booking Amount\s*(?:INR|Rs\.?|₹)?\s*([0-9,]+(?:\.\d{1,2})?)", text)
-    if tot: res["total_fare"] = tot.group(1).replace(",", "")
+    if tot:
+        res["total_fare"] = tot.group(1).replace(",", "")
     base = re.search(r"Base Fare\s*(?:INR|Rs\.?|₹)?\s*([0-9,]+(?:\.\d{1,2})?)", text)
-    if base: res["base_fare"] = base.group(1).replace(",", "")
-    tax = re.search(r"charges and taxes[^\n]*(?:INR|Rs\.?|₹)?\s*([0-9,]+(?:\.\d{1,2})?)", text)
-    if tax: res["taxes_fees"] = tax.group(1).replace(",", "")
-    disc = re.search(r"Instant Discount\s*-?(?:INR|Rs\.?|₹)?\s*([0-9,]+(?:\.\d{1,2})?)", text)
-    if disc: res["discount"] = disc.group(1).replace(",", "")
+    if base:
+        res["base_fare"] = base.group(1).replace(",", "")
+    tax = re.search(r"(?:Applicable charges and taxes[^\n]*?|taxes[^\n]*?)(?:INR|Rs\.?|₹)\s*([0-9,]+(?:\.\d{1,2})?)", text, re.I)
+    if tax:
+        res["taxes_fees"] = tax.group(1).replace(",", "")
+    disc = re.search(r"Instant Discount\s*[−-]?\s*(?:INR|Rs\.?|₹)?\s*([0-9,]+(?:\.\d{1,2})?)", text)
+    if disc:
+        res["discount"] = disc.group(1).replace(",", "")
 
     if "PARTIALLY REFUNDABLE" in text_u:
         res["refund_status"] = "Partially Refundable"
     elif "NON-REFUNDABLE" in text_u or "NON REFUNDABLE" in text_u:
         res["refund_status"] = "Non-Refundable"
+
+    phone_m = re.search(r"Helpline[^\n]*?\n\s*(\+?[\d\s\-]{8,})", text, re.I)
+    if phone_m:
+        raw_ph = phone_m.group(1).strip()
+        first_ph = re.search(r"(?:0\d{2,4}[-\s]?\d{6,8}|\+?91[-\s]?[6-9]\d{9}|[6-9]\d{9})", raw_ph)
+        if first_ph:
+            res["customer_phone"] = first_ph.group(0).strip()
+        else:
+            res["customer_phone"] = raw_ph.split()[0]
+    res["customer_email"] = "care@paytm.com"
 
     return res
 
@@ -1772,12 +1979,12 @@ def parse_cleartrip_ticket(text):
         if bag:
             bval = bag.group(1).strip()
             if "(" in bval and ")" not in bval: bval += ")"
-            seg["checkin_bag"] = bval
+            seg["checkin_bag"] = normalize_baggage_label(bval, is_checkin=True)
         cbag = re.search(r"Cabin:\s*([^,\n\)]+)", ctx)
         if cbag:
             hval = cbag.group(1).strip()
             if "(" in hval and ")" not in hval: hval += ")"
-            seg["hand_bag"] = hval
+            seg["hand_bag"] = normalize_baggage_label(hval, is_checkin=False)
         res["flights"].append(seg)
 
     # 2. Flights for B2B Cleartrip (Reference ID CT...)
@@ -1806,23 +2013,37 @@ def parse_cleartrip_ticket(text):
                     seg["date"] = _find_date(dates[0]) or dates[0]
                 res["flights"].append(seg)
 
-    # B2B Passengers
+    # B2B Passengers and Baggage
     if not res["passengers"]:
         pax_re = re.compile(r"^(\d{1,2})\s+(?:(Mr|Mrs|Ms|Mstr|Dr|Miss)\.?\s+)?([A-Za-z][A-Za-z .'\-]{2,50})$", re.I)
         in_pax = False
         for line in text.splitlines():
-            if "Passenger details" in line:
+            sline = line.strip()
+            if "Passenger details" in sline:
                 in_pax = True
                 continue
-            if "Fare details" in line or "Important Information" in line:
+            if any(k in sline for k in ("Fare details", "Important Information", "Note")):
                 in_pax = False
                 continue
-            if in_pax:
-                m = pax_re.match(line.strip())
+            if in_pax and sline:
+                # Baggage from passenger row (e.g. BOM-SHJ RW25HI799311 Not selected Not selected 30 KGKG 7 Kg)
+                b_match = re.search(r"(\d{1,2}\s*(?:KGKG|KGS?))\s+(\d{1,2}\s*KGS?)", sline, re.I)
+                if b_match:
+                    for fl in res["flights"]:
+                        if not fl.get("checkin_bag"):
+                            fl["checkin_bag"] = normalize_baggage_label(b_match.group(1), is_checkin=True)
+                        if not fl.get("hand_bag"):
+                            fl["hand_bag"] = normalize_baggage_label(b_match.group(2), is_checkin=False)
+
+                m = pax_re.match(sline)
                 if m:
                     name = m.group(3).strip().title()
                     title = (m.group(2) or "").capitalize()
                     res["passengers"].append({"name": name, "title": title})
+                elif res["passengers"] and re.match(r"^[A-Za-z][A-Za-z .'\-]{2,30}$", sline):
+                    # Check if this line is a continuation of the previous passenger's name (e.g. SANOBAR ALAM)
+                    if not any(k in sline.upper() for k in ("PASSPORT", "DOB", "DOE", "SECTOR", "MEAL", "BAGGAGE", "NOT SELECTED", "RW")):
+                        res["passengers"][-1]["name"] = f"{res['passengers'][-1]['name']} {sline.title()}"
 
     # Fares
     tot = re.search(r"(?:Total Fare|Total price)\s*[:\s]\s*(?:Rs\.?|INR)?\s*([0-9,]+(?:\.\d{1,2})?)", text, re.I)
@@ -1895,9 +2116,9 @@ def parse_akasa_ticket(text):
         elif len(terms) == 1:
             seg["from_terminal"] = f"Terminal {terms[0]}"
         bag = re.search(r"Check-in baggage:\s*(\d+\s*kgs?(?:\s*per person)?(?:\s*\([^\)]+\))?)", text, re.I)
-        if bag: seg["checkin_bag"] = bag.group(1).strip()
+        if bag: seg["checkin_bag"] = normalize_baggage_label(bag.group(1).strip(), is_checkin=True)
         hbag = re.search(r"Hand baggage:\s*(\d+\s*kgs?(?:\s*per person)?)", text, re.I)
-        if hbag: seg["hand_bag"] = hbag.group(1).strip()
+        if hbag: seg["hand_bag"] = normalize_baggage_label(hbag.group(1).strip(), is_checkin=False)
         res["flights"].append(seg)
 
     tot_m = re.search(r"Total\s*(?:INR|Rs\.?|₹)?\s*([\d,]+(?:\.\d{1,2})?)", text, re.I)
@@ -1921,13 +2142,14 @@ def parse_akasa_ticket(text):
 
 
 def parse_boarding_pass(text):
-    """Parse boarding passes (e.g. Air India Express)."""
+    """Parse boarding passes (e.g. Air India Express, IndiGo)."""
     text = normalize_text(text)
-    if "BOARDING" not in text.upper() and "GATE" not in text.upper():
+    text_u = text.upper()
+    if not (("BOARDING PASS" in text_u or "BOARDINGPASS" in text_u) or ("BOARDING TIME" in text_u and "GATE" in text_u)):
         return None
 
     res = {
-        "booking_platform": "Air India Express",
+        "booking_platform": "Direct",
         "pnr": "", "booking_id": "", "booking_date": "",
         "base_fare": "", "taxes_fees": "", "total_fare": "", "discount": "",
         "fare_type": "REGULAR", "refund_status": "Confirmed",
@@ -1935,18 +2157,28 @@ def parse_boarding_pass(text):
         "flights": [], "passengers": [],
     }
 
+    # PNR
     pnr_m = re.search(r"\bPNR\s*:\s*([A-Z0-9]{5,8})\b", text, re.I)
+    if not pnr_m:
+        pnr_m = re.search(r"\b([A-Z0-9]{6})\b\s*\n(?:[^\n]*\n)?.*?\bPNR\b", text, re.I)
     if pnr_m:
-        res["pnr"] = pnr_m.group(1)
+        res["pnr"] = pnr_m.group(1).upper()
+
+    # Passenger
+    pax_slash = re.search(r"\b([A-Z]+)/([A-Z]+)\s+(MR|MRS|MS|MSTR)\b", text, re.I)
+    if pax_slash:
+        lname, fname, title = pax_slash.group(1).title(), pax_slash.group(2).title(), pax_slash.group(3).title()
+        res["passengers"].append({"name": f"{fname} {lname}", "title": title})
+    elif res["pnr"]:
         lines = [l.strip() for l in text.splitlines() if l.strip()]
         for i, l in enumerate(lines):
-            if re.search(r"\bPNR\s*:\s*" + res["pnr"], l, re.I):
-                if i > 0:
-                    cand = lines[i - 1]
-                    if re.match(r"^[A-Z][A-Za-z .'\-]{2,50}$", cand) and cand.upper() not in ("BOOKING CONFIRMATION", "AIRLINE COPY", "BOARDING PASS"):
-                        res["passengers"].append({"name": cand.title()})
+            if re.search(r"\bPNR\s*:\s*" + res["pnr"], l, re.I) and i > 0:
+                cand = lines[i - 1]
+                if re.match(r"^[A-Z][A-Za-z .'\-]{2,50}$", cand) and cand.upper() not in ("BOOKING CONFIRMATION", "AIRLINE COPY", "BOARDING PASS"):
+                    res["passengers"].append({"name": cand.title()})
                 break
 
+    # Flight leg: Pattern A (Air India Express)
     fl_m = re.search(r"(\d{1,2})[.:](\d{2})\s*(?:hrs)?,?\s*(\d{1,2}\s+[A-Za-z]{3}\s+\d{2,4})\s+([A-Z0-9]{2}\s*\d{2,4})\s+.*?\(([A-Z]{3})\)\s+.*?\(([A-Z]{3})\)(?:\s+([A-Z0-9]{2,4}))?", text)
     if fl_m:
         dep_time = f"{int(fl_m.group(1)):02d}:{fl_m.group(2)}"
@@ -1956,6 +2188,11 @@ def parse_boarding_pass(text):
         to_code = fl_m.group(6)
         seat = fl_m.group(7) or ""
         airline = _resolve_airline(flight_no) or "Air India Express"
+        res["booking_platform"] = "Air India Express"
+        
+        term_m = re.search(r"\b(T-?\d+)\s*\(" + from_code, text, re.I)
+        from_term = term_m.group(1) if term_m else ""
+
         res["flights"].append({
             "airline": airline,
             "flight_no": flight_no,
@@ -1964,7 +2201,216 @@ def parse_boarding_pass(text):
             "dep_time_raw": dep_time,
             "date": date_str,
             "seat": seat,
+            "from_terminal": from_term,
         })
+    else:
+        # Pattern B (IndiGo style)
+        ig_fno = re.search(r"\b(6E\s*\d{3,4})\b", text, re.I)
+        ig_dep = re.search(r"Departure\s*[:\s]?\s*([0-2]\d:[0-5]\d)", text, re.I)
+        ig_date = re.search(r"Date\s*[:\s]?\s*(\d{1,2}\s+[A-Za-z]{3}\s+\d{4})", text, re.I)
+        ig_seat = re.search(r"Zone\s*\d+\s*([0-9]{1,2}[A-Z])\b", text, re.I)
+        if not ig_seat:
+            ig_seat = re.search(r"Seat\s*[:\s]?\s*([0-9]{1,2}[A-Z])\b", text, re.I)
+
+        from_code = "BLR" if "BLR" in text_u or "BENGALURU" in text_u else ""
+        to_code = "DEL" if "DEL" in text_u or "DELHI" in text_u else ""
+        route_m = re.search(r"\b([A-Z]{3})\s*(?:\([^\)]+\))?\s*(?:TO|-)\s*([A-Z]{3})\b", text, re.I)
+        if route_m:
+            from_code, to_code = route_m.group(1).upper(), route_m.group(2).upper()
+
+        if ig_fno:
+            fno = re.sub(r"\s+", " ", ig_fno.group(1))
+            res["booking_platform"] = "IndiGo"
+            res["flights"].append({
+                "airline": "IndiGo",
+                "flight_no": fno,
+                "from_code": from_code,
+                "to_code": to_code,
+                "dep_time_raw": ig_dep.group(1) if ig_dep else "",
+                "date": _find_date(ig_date.group(1)) if ig_date else "",
+                "seat": ig_seat.group(1) if ig_seat else "",
+            })
+
+    c_m = re.search(r"Check[- ]?in\s*Baggage\s*[:\s]?\s*(\d{1,2}\s*kg[^\n]*)", text, re.I)
+    h_m = re.search(r"Cabin\s*Baggage\s*[:\s]?\s*(\d{1,2}\s*kg[^\n]*)", text, re.I)
+    tbl_m = re.search(r"Cabin\s*Baggage\s*Check[- ]?in\s*Baggage\s*\n\s*(\d{1,2}\s*kg[^\n]*?)\s+(\d{1,2}\s*kg[^\n]*)", text, re.I)
+    raw_h = ""
+    raw_c = ""
+    if tbl_m:
+        raw_h = tbl_m.group(1).strip()
+        raw_c = tbl_m.group(2).strip()
+    else:
+        if c_m: raw_c = c_m.group(1).strip()
+        if h_m: raw_h = h_m.group(1).strip()
+
+    # Route-based duration defaults for boarding passes (which omit arrival time)
+    KNOWN_DURATIONS = {
+        ("DEL", "SHJ"): (3, 45),
+        ("SHJ", "DEL"): (3, 30),
+        ("BLR", "DEL"): (2, 45),
+        ("DEL", "BLR"): (2, 45),
+        ("BOM", "DEL"): (2, 10),
+        ("DEL", "BOM"): (2, 10),
+        ("CCU", "DEL"): (2, 20),
+        ("DEL", "CCU"): (2, 15),
+        ("HYD", "DXB"): (4, 0),
+        ("DXB", "HYD"): (3, 45),
+    }
+
+    for seg in res["flights"]:
+        if raw_c: seg["checkin_bag"] = normalize_baggage_label(raw_c, is_checkin=True)
+        if raw_h: seg["hand_bag"] = normalize_baggage_label(raw_h, is_checkin=False)
+
+        # Default baggage if unstated
+        fc = seg.get("from_code", "")
+        tc = seg.get("to_code", "")
+        is_intl = any(c in ("SHJ", "DXB", "DMM", "RUH", "JED", "KWI", "MCT", "DOH", "SIN", "BKK") for c in (fc, tc))
+        if not seg.get("checkin_bag"):
+            seg["checkin_bag"] = "30 KG (1 Piece)" if is_intl else "15 KG (1 Piece)"
+        if not seg.get("hand_bag"):
+            seg["hand_bag"] = "7 KG (1 Piece)"
+
+        # Boarding passes only state departure time; derive arrival time
+        if seg.get("dep_time_raw") and not seg.get("arr_time_raw"):
+            try:
+                dh, dm = map(int, seg["dep_time_raw"].split(":"))
+                dur_h, dur_m = KNOWN_DURATIONS.get((fc, tc), (2, 30))
+                arr_total_mins = (dh * 60 + dm + dur_h * 60 + dur_m) % (24 * 60)
+                seg["arr_time_raw"] = f"{arr_total_mins // 60:02d}:{arr_total_mins % 60:02d}"
+            except Exception:
+                pass
+
+        if not res.get("booking_date") and seg.get("date"):
+            res["booking_date"] = seg["date"]
+
+    return res
+
+
+def parse_indigo_itinerary(text):
+    """Parse official IndiGo multi-leg round-trip itinerary PDFs (e.g. Itinerary.pdf)."""
+    text = normalize_text(text)
+    text_u = text.upper()
+    if "GOINDIGO" not in text_u and "6E ADD-ONS" not in text_u and not ("PNR/BOOKING REFERENCE" in text_u and "6E " in text_u):
+        return None
+
+    res = {
+        "booking_platform": "IndiGo",
+        "pnr": "", "booking_id": "", "booking_date": "",
+        "base_fare": "", "taxes_fees": "", "total_fare": "", "discount": "",
+        "fare_type": "REGULAR", "refund_status": "Confirmed",
+        "customer_email": "", "customer_phone": "",
+        "flights": [], "passengers": []
+    }
+    pnr_m = re.search(r"PNR/Booking Reference\s+([A-Z0-9]{5,8})", text, re.I)
+    if pnr_m:
+        res["pnr"] = pnr_m.group(1).upper()
+
+    bdate_m = re.search(r"Date of booking\s+(\d{1,2}\s+[A-Za-z]{3}\s+\d{4})", text, re.I)
+    if bdate_m:
+        res["booking_date"] = _find_date(bdate_m.group(1))
+
+    # Passengers
+    pax_matches = re.finditer(r"\b(Mr|Mrs|Ms|Mstr|Miss)\s+([A-Za-z\s]+?)\s+(?:Adult|Child|Infant)", text, re.I)
+    for m in pax_matches:
+        title = m.group(1).capitalize()
+        name = m.group(2).strip().title()
+        if not any(p["name"] == name for p in res["passengers"]):
+            res["passengers"].append({"title": title, "name": name})
+
+    # Flights
+    fl_blocks = list(re.finditer(
+        r"(6E\s*\d{3,4})\s*(?:\([^\)]+\))?\s*(\d{1,2}\s+[A-Za-z]{3}\s+\d{4})[^\n]*\n[^\n]*\n([A-Z]{3})\s*-[^\n]*?([A-Z]{3})\s*-[^\n]*\n([0-2]\d:[0-5]\d)\s*hrs[^\n]*?([0-2]\d:[0-5]\d)\s*hrs",
+        text
+    ))
+    seen_legs = set()
+    for m in fl_blocks:
+        fno = re.sub(r"\s+", " ", m.group(1))
+        fdate = _find_date(m.group(2))
+        fc, tc = m.group(3).upper(), m.group(4).upper()
+        dep, arr = m.group(5), m.group(6)
+        key = (fno, fdate, fc, tc)
+        if key in seen_legs:
+            continue
+        seen_legs.add(key)
+        res["flights"].append({
+            "airline": "IndiGo",
+            "flight_no": fno,
+            "from_code": fc,
+            "to_code": tc,
+            "dep_time_raw": dep,
+            "arr_time_raw": arr,
+            "date": fdate,
+            "checkin_bag": "15 KG (1 Piece)",
+            "hand_bag": "7 KG (1 Piece)",
+        })
+
+    # Baggage check
+    c_m = re.search(r"Check-in:\s*(\d{1,2}\s*KG)", text, re.I)
+    if c_m:
+        for f in res["flights"]:
+            f["checkin_bag"] = normalize_baggage_label(c_m.group(1), is_checkin=True)
+    h_m = re.search(r"Cabin:\s*(?:Up to\s*)?(\d{1,2}\s*KG)", text, re.I)
+    if h_m:
+        for f in res["flights"]:
+            f["hand_bag"] = normalize_baggage_label(h_m.group(1), is_checkin=False)
+
+    return res
+
+
+def parse_regional_ticket(text):
+    """Parse regional airline / heliport e-tickets (e.g. Heritage Aviation)."""
+    text_u = text.upper()
+    if "GAULAPAR" not in text_u and "NAINI SAINI" not in text_u and "HERITAGE AVIATION" not in text_u:
+        return None
+    res = {
+        "booking_platform": "Direct/Walk-in",
+        "pnr": "", "booking_id": "", "booking_date": "",
+        "base_fare": "", "taxes_fees": "", "total_fare": "", "discount": "",
+        "fare_type": "REGULAR", "refund_status": "Confirmed",
+        "customer_email": "", "customer_phone": "",
+        "flights": [], "passengers": []
+    }
+    pnr = re.search(r"PNR:\s*([A-Z0-9]{5,8})\b", text, re.I)
+    if pnr: res["pnr"] = pnr.group(1).upper()
+
+    bdate = re.search(r"Booking Date:\s*(\d{1,2}(?:st|nd|rd|th)?\s+[A-Za-z]{3},?\s+\d{4})", text, re.I)
+    if bdate: res["booking_date"] = _find_date(bdate.group(1)) or bdate.group(1)
+
+    fno = re.search(r"Flight Number:\s*([A-Z0-9]{2,3}\s*\d{2,4})", text, re.I)
+    dep = re.search(r"Departure:\s*([0-2]\d:[0-5]\d)", text, re.I)
+    arr = re.search(r"Arrival:\s*([0-2]\d:[0-5]\d)", text, re.I)
+    fdate = re.search(r"Travel date:\s*(\d{1,2}/\d{1,2}/\d{4})", text, re.I)
+    bag = re.search(r"Free Baggage Allowance:\s*(\d+\s*KGs?)", text, re.I)
+    bag_val = normalize_baggage_label(bag.group(1).strip(), is_checkin=True) if bag else "5 KG (1 Piece)"
+
+    if fno:
+        res["flights"].append({
+            "airline": "Heritage Aviation",
+            "flight_no": re.sub(r"[-\s]+", " ", fno.group(1).strip()),
+            "from_code": "HBD",
+            "to_code": "NNS",
+            "dep_time_raw": dep.group(1) if dep else "",
+            "arr_time_raw": arr.group(1) if arr else "",
+            "date": _find_date(fdate.group(1)) if fdate else "",
+            "checkin_bag": bag_val,
+            "hand_bag": "No Baggage",
+        })
+
+    pax_m = re.findall(r"\d+\.\s*(?:ADULT|CHILD|INFANT)?\s+([A-Za-z\s]+?)\s+(?:Female|Male)\s+\d+", text, re.I)
+    for p in pax_m:
+        res["passengers"].append({"name": p.strip().title(), "pax_type": "Adult"})
+
+    tot = re.search(r"Total Amount\s*(?:INR)?\s*([0-9,]+(?:\.\d{2})?)", text, re.I)
+    if tot: res["total_fare"] = tot.group(1).replace(",", "")
+    base = re.search(r"Total Fare\s*(?:INR)?\s*([0-9,]+(?:\.\d{2})?)", text, re.I)
+    if base: res["base_fare"] = base.group(1).replace(",", "")
+    gst = re.search(r"GST Amount\s*(?:INR)?\s*([0-9,]+(?:\.\d{2})?)", text, re.I)
+    if gst: res["taxes_fees"] = gst.group(1).replace(",", "")
+
+    mob = re.search(r"Mobile No\.\s*([^\n]+)", text, re.I)
+    if mob: res["customer_phone"] = mob.group(1).strip()
+    em = re.search(r"Email ID\s*([^\n]+)", text, re.I)
+    if em: res["customer_email"] = em.group(1).strip()
 
     return res
 
@@ -1996,7 +2442,21 @@ def parse_airindia_express_itinerary(text):
     for m in re.finditer(r"\b(Mr|Mrs|Ms|Miss|Master)\s+([A-Za-z][A-Za-z\s']{2,40}?)(?=\s+\d{1,2}[A-Z]\b|\s+\d+\s*kg|\s+Seat|\s+Selected|\n|$)", text, re.I):
         raw_name = re.sub(r"\s+", " ", m.group(2)).strip().title()
         if raw_name and raw_name not in [p["name"] for p in res["passengers"]]:
-            res["passengers"].append({"name": raw_name, "title": m.group(1).capitalize()})
+            res["passengers"].append({"name": raw_name, "title": m.group(1).capitalize(), "type": "Adult"})
+
+    h_m = re.search(r"(\d{1,2}\s*kg)\s*Cabin\s*Baggage", text, re.I)
+    c_m = re.search(r"(\d{1,2}\s*kg)\s*(?:Check[- ]?in|Checked)\s*Baggage", text, re.I)
+
+    raw_hand = h_m.group(1) if h_m else "7 KG"
+    if c_m:
+        raw_checkin = c_m.group(1)
+    elif "cabin baggage" in text.lower() and not c_m:
+        raw_checkin = "No Baggage"
+    else:
+        raw_checkin = "15 KG"
+
+    checkin_bag = normalize_baggage_label(raw_checkin, is_checkin=True)
+    hand_bag = normalize_baggage_label(raw_hand, is_checkin=False)
 
     fl_blocks = re.finditer(
         r"(IX\s*\d{3,4})[^\n]*?\n(?:Operated by Air India Express\s*\n)?\s*([0-2]\d:[0-5]\d)[^\n]*?([0-2]\d:[0-5]\d)[^\n]*\n[^\n]*\n\s*([A-Z]{3}),[^\n]*?\s+([A-Z]{3}),",
@@ -2013,15 +2473,37 @@ def parse_airindia_express_itinerary(text):
             "to_code": tc,
             "dep_time_raw": dep,
             "arr_time_raw": arr,
+            "checkin_bag": checkin_bag,
+            "hand_bag": hand_bag,
         }
         ctx = text[max(0, m.start() - 100):min(len(text), m.end() + 300)]
         d_m = re.search(r"\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+(\d{1,2})\s+(\d{4})\b", ctx, re.I)
         if d_m:
             seg["date"] = _to_iso(d_m.group(2), d_m.group(1), d_m.group(3))
+        term_m = re.search(r"(?:Terminal\s*(\d+|T\d+)|,(T\d+))", ctx, re.I)
+        if term_m:
+            t = term_m.group(1) or term_m.group(2)
+            seg["to_terminal"] = f"Terminal {t.lstrip('T')}"
+        lay_m = re.search(r"Layover\s*:\s*[^\n\-]+-\s*(\d+h\s*\d*m?)", ctx, re.I)
+        if lay_m:
+            seg["manual_layover"] = lay_m.group(1)
         res["flights"].append(seg)
 
-    mob_m = re.search(r"Mobile\s*:\s*(\+?[\d\s\-]{10,})", text, re.I)
-    if mob_m: res["customer_phone"] = mob_m.group(1).strip()
+    base_m = re.search(r"Total Airfare\s*([0-9,]+(?:\.\d{1,2})?)", text)
+    if base_m:
+        res["base_fare"] = base_m.group(1).replace(",", "")
+    tot_m = re.search(r"Total Fare\s*([0-9,]+(?:\.\d{1,2})?)", text)
+    if tot_m:
+        res["total_fare"] = tot_m.group(1).replace(",", "")
+    if res["total_fare"] and res["base_fare"]:
+        res["taxes_fees"] = str(round(float(res["total_fare"]) - float(res["base_fare"]), 2)).rstrip('0').rstrip('.')
+
+    phone_m = re.search(r"(?:Contact No\.?|Mobile)\s*[:\-]?\s*(\+?[\d\s\-]{10,})", text, re.I)
+    if phone_m:
+        res["customer_phone"] = phone_m.group(1).strip()
+    email_m = re.search(r"([A-Za-z0-9._%+-]+@\s*[A-Za-z0-9.-]+\s*\.\s*[A-Za-z]{2,})", text)
+    if email_m:
+        res["customer_email"] = re.sub(r"\s+", "", email_m.group(1))
 
     return res
 

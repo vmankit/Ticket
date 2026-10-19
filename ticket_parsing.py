@@ -8,7 +8,7 @@ read from a handful of stable anchors instead of guessed at.
 
 import re
 
-OWN_BRANDS = ("BHARAT HORIZON TRAVELS", "ANKIT TRAVELS")
+OWN_BRANDS = ("JS JULFAQAR TRAVELS", "BHARAT HORIZON TRAVELS", "ANKIT TRAVELS")
 
 MONTHS = {m: i for i, m in enumerate(
     ["JAN", "FEB", "MAR", "APR", "MAY", "JUN",
@@ -453,10 +453,10 @@ def looks_like_own_ticket(text_upper):
         return False
 
     # Own current layout: check for key layout headers and sections
-    if "ITINERARY" in text_upper and "PASSENGERS" in text_upper:
+    if "ITINERARY" in text_upper and ("PASSENGERS" in text_upper or "PASSENGER" in text_upper):
         if any(h in text_upper for h in ("PASSENGER SECTOR PNR SEAT MEAL", "AMOUNT PAID", "SHOW YOUR BARCODE AT THE AIRPORT")):
             return True
-        if "CONFIRMED" in text_upper and any(b in text_upper for b in ("BHARAT HORIZON TRAVELS", "ANKIT TRAVELS")):
+        if any(b in text_upper for b in OWN_BRANDS):
             return True
 
     # Own legacy layout
@@ -993,14 +993,14 @@ def _parse_own_current(text):
     if pnr_match:
         result["pnr"] = pnr_match.group(1).upper()
     else:
-        for idx, line in enumerate(lines[:6]):
+        for idx, line in enumerate(lines[:8]):
             if line.upper().rstrip().endswith("PNR") and idx + 1 < len(lines):
                 tokens = re.findall(r"\b([A-Z0-9]{4,10})\b", lines[idx + 1].upper())
                 if tokens:
                     result["pnr"] = tokens[-1]
                 break
 
-    booking = re.search(r"Booking\s*(?:reference\s*:\s*|\s+)([A-Za-z0-9][A-Za-z0-9\-]{3,})", joined, re.I)
+    booking = re.search(r"Booking\s*(?:reference|ref|id)?\s*[:\-]?\s*([A-Za-z0-9][A-Za-z0-9\-]{3,})", joined, re.I)
     if booking:
         result["booking_id"] = booking.group(1)
 
@@ -1016,6 +1016,11 @@ def _parse_own_current(text):
     plat = re.search(r"Platform\s*:\s*([A-Za-z0-9/ ]+)", joined, re.I)
     if plat:
         result["booking_platform"] = plat.group(1).split("|")[0].strip()
+    if not result["booking_platform"]:
+        for ag in ("JS JULFAQAR TRAVELS", "BHARAT HORIZON TRAVELS", "ANKIT TRAVELS"):
+            if ag.upper() in joined.upper():
+                result["booking_platform"] = ag
+                break
 
     email = re.search(r"(?:Traveller\s*contact.*?|Email.*?)\s*([\w.%+-]+@[\w.-]+\.[A-Za-z]{2,})", joined, re.I)
     if email:
@@ -1023,6 +1028,14 @@ def _parse_own_current(text):
     phone = re.search(r"(?:Traveller\s*contact|Phone|Mobile)\s*[:\-]?\s*(\+?[\d\s-]{10,})", joined, re.I)
     if phone:
         result["customer_phone"] = phone.group(1).split("|")[0].strip()
+    if not result["customer_phone"]:
+        ph_m = re.search(r"(\+?91[\s-]?[6-9]\d{9}|\b[6-9]\d{9}\b)", joined)
+        if ph_m:
+            result["customer_phone"] = ph_m.group(1).strip()
+    if not result["customer_email"]:
+        em_m = re.search(r"\b([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})\b", joined)
+        if em_m:
+            result["customer_email"] = em_m.group(1).strip()
 
     # Only the total is printed on the ticket now; the base/tax split is
     # not there to recover. Tickets issued before that change carried the
@@ -1054,9 +1067,8 @@ def _parse_own_current(text):
 
     # ── Itinerary cards ──────────────────────────────────────────────────
     header_re = re.compile(
-        r"^(?:([A-Z0-9]{2})\s+(.+?)\s+·\s+([A-Z0-9]{2}\s?\d{2,4})|([A-Za-z ]+?)\s+([A-Z0-9]{2}\s*\d{2,4}))\b", re.I)
+        r"^(?:([A-Z0-9]{2})\s+(.+?)\s*[\s·•\-\u2022\ufffd\?|]+\s*([A-Z0-9]{2}\s?\d{1,4})|([A-Za-z ]+?)\s+([A-Z0-9]{2}\s*\d{1,4}))\b", re.I)
     route_re = re.compile(r"^(?:([A-Z]{3})\s+([A-Z]{3})|[A-Za-z ]*\(([A-Z]{3})\)\s+TO\s+[A-Za-z ]*\(([A-Z]{3})\))$", re.I)
-    times_re = re.compile(r"(\d{1,2}:[0-5]\d\s*[AP]M)\s*(?:-|–|to|\s+)\s*(\d{1,2}:[0-5]\d\s*[AP]M)", re.I)
 
     itinerary = _section(lines, "ITINERARY", "PASSENGERS", "FARE")
     for idx, line in enumerate(itinerary):
@@ -1065,11 +1077,17 @@ def _parse_own_current(text):
             continue
         fl_no = header.group(3) or header.group(5) or ""
         al_name = header.group(2) or header.group(4) or ""
+        fl_match = re.match(r"^([A-Z0-9]{2})\s*(\d{1,4})$", fl_no.strip(), re.I)
+        if fl_match:
+            fl_no = f"{fl_match.group(1).upper()} {fl_match.group(2)}"
+        else:
+            fl_no = re.sub(r"\s+", " ", fl_no).upper()
+        al_name = re.sub(r"^[A-Z0-9]{2}\s+", "", al_name.strip()).title()
         segment = {
-            "flight_no": re.sub(r"\s+", " ", fl_no).upper(),
-            "airline": al_name.strip().title(),
+            "flight_no": fl_no,
+            "airline": al_name,
         }
-        for candidate in itinerary[idx + 1:idx + 6]:
+        for candidate in itinerary[idx + 1:]:
             if header_re.match(candidate):
                 break
             route = route_re.match(candidate.strip().upper())
@@ -1077,45 +1095,76 @@ def _parse_own_current(text):
                 segment["from_code"] = route.group(1) or route.group(3)
                 segment["to_code"] = route.group(2) or route.group(4)
                 continue
-            times = times_re.search(candidate)
-            if times and "dep_time_raw" not in segment:
-                segment["dep_time_raw"] = _to_24h(*re.match(
-                    r"(\d{1,2}):([0-5]\d)\s*([AP]M)", times.group(1), re.I).groups())
-                segment["arr_time_raw"] = _to_24h(*re.match(
-                    r"(\d{1,2}):([0-5]\d)\s*([AP]M)", times.group(2), re.I).groups())
+            times_12h = re.search(r"(\d{1,2}:[0-5]\d\s*[AP]M)\s*(?:-|–|to|\s+)\s*(\d{1,2}:[0-5]\d\s*[AP]M)", candidate, re.I)
+            times_24h = re.search(r"(?<!\d)([01]?\d|2[0-3]):([0-5]\d)\s*(?:-|–|to|\s+)\s*([01]?\d|2[0-3]):([0-5]\d)(?!\d)", candidate)
+            if times_12h and "dep_time_raw" not in segment:
+                m1 = re.match(r"(\d{1,2}):([0-5]\d)\s*([AP]M)", times_12h.group(1), re.I)
+                m2 = re.match(r"(\d{1,2}):([0-5]\d)\s*([AP]M)", times_12h.group(2), re.I)
+                if m1 and m2:
+                    segment["dep_time_raw"] = _to_24h(*m1.groups())
+                    segment["arr_time_raw"] = _to_24h(*m2.groups())
+                    continue
+            elif times_24h and "dep_time_raw" not in segment:
+                h1, min1, h2, min2 = times_24h.groups()
+                segment["dep_time_raw"] = f"{int(h1):02d}:{min1}"
+                segment["arr_time_raw"] = f"{int(h2):02d}:{min2}"
                 continue
             if "date" not in segment:
                 found = _find_date(candidate)
                 if found:
                     segment["date"] = found
             if "baggage" in candidate.lower():
-                c_m = re.search(r"([0-9A-Za-z\s\(\)]+?)\s+check-in", candidate, re.I)
+                c_m = re.search(r"(?:Baggage\s+)?([0-9A-Za-z\s\(\)]+?)\s+check-in", candidate, re.I)
                 if c_m:
                     segment["checkin_bag"] = normalize_baggage_label(c_m.group(1), is_checkin=True)
-                h_m = re.search(r"([0-9A-Za-z\s\(\)]+?)\s+cabin", candidate, re.I)
+                h_m = re.search(r"(?:check-in\s*[\s·•\-\u2022\ufffd\?|]+\s*|\s+)([0-9A-Za-z\s\(\)]+?)\s+cabin", candidate, re.I)
+                if not h_m:
+                    h_m = re.search(r"([0-9A-Za-z\s\(\)]+?)\s+cabin", candidate, re.I)
                 if h_m:
                     segment["hand_bag"] = normalize_baggage_label(h_m.group(1), is_checkin=False)
+            term_m = re.search(r"(?:Terminal|T)\s*[:\-]?\s*([A-Za-z0-9]+)", candidate, re.I)
+            if term_m:
+                if "to_terminal" not in segment:
+                    segment["to_terminal"] = f"T{term_m.group(1)}" if not term_m.group(1).upper().startswith("T") else term_m.group(1).upper()
+        segment.setdefault("checkin_bag", "15 KG (1 Piece)")
+        segment.setdefault("hand_bag", "7 KG (1 Piece)")
         if segment.get("from_code"):
             result["flights"].append(segment)
 
-    # ── Passenger rows ───────────────────────────────────────────────────
-    pax_lines = _section(lines, "PASSENGERS", "FARE", "Issued")
+    # ── Passenger rows (with multiline / wrapped surname support) ─────────────
+    pax_lines = _section(lines, "PASSENGERS", "FARE", "Issued", "AMOUNT")
     pax_re = re.compile(
         r"^(\d{1,2})\.\s+(?:(Mr|Mrs|Ms|Mstr|Dr|Miss)\.?\s+)?"
         r"([A-Za-z][A-Za-z .'\-]{2,40}?)\s*(?=[A-Z]{3}-[A-Z]{3}\b|\d{3}-\d|\||\s*$)", re.I)
-    for line in pax_lines:
+    i = 0
+    while i < len(pax_lines):
+        line = pax_lines[i]
         match = pax_re.match(line)
-        if not match:
-            continue
-        name = re.sub(r"\s{2,}", " ", match.group(3)).strip().title()
-        if len(name.split()) < 2:
-            continue
-        ticket = re.search(r"\b(\d{3}-\d{6,}|\d{13})\b", line)
-        result["passengers"].append({
-            "name": name,
-            "title": (match.group(2) or "").title(),
-            "ticket_no": ticket.group(1) if ticket else "",
-        })
+        if match:
+            p_no = match.group(1)
+            title = (match.group(2) or "").title()
+            name = re.sub(r"\s{2,}", " ", match.group(3)).strip().title()
+            ticket = re.search(r"\b(\d{3}-\d{6,}|\d{13})\b", line)
+            # Look ahead for wrapped surname on continuation lines
+            j = i + 1
+            while j < len(pax_lines) and not pax_re.match(pax_lines[j]) and not re.search(r"^(?:INR|AMOUNT|Total|Issued)", pax_lines[j], re.I):
+                nxt = pax_lines[j]
+                sec_m = re.search(r"\b[A-Z]{3}-[A-Z]{3}\b", nxt)
+                if sec_m:
+                    before_sec = nxt[:sec_m.start()].strip()
+                    if before_sec and not re.search(r"\d", before_sec) and len(before_sec) >= 2:
+                        name = f"{name} {before_sec.title()}"
+                if not ticket:
+                    t_m = re.search(r"\b(\d{3}-\d{6,}|\d{13})\b", nxt)
+                    if t_m:
+                        ticket = t_m
+                j += 1
+            result["passengers"].append({
+                "name": name,
+                "title": title,
+                "ticket_no": ticket.group(1) if ticket else "",
+            })
+        i += 1
 
     return result
 

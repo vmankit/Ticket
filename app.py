@@ -458,6 +458,9 @@ def is_potential_airport_code(code):
 def detect_platform(text_upper, filename=""):
     haystack = f"{text_upper} {filename.upper()}"
     mapping = {
+        "JS JULFAQAR": "JS JULFAQAR TRAVELS",
+        "BHARAT HORIZON": "BHARAT HORIZON TRAVELS",
+        "ANKIT TRAVELS": "ANKIT TRAVELS",
         "MAKEMYTRIP": "MakeMyTrip",
         "CLEARTRIP": "Cleartrip",
         "GOIBIBO": "Goibibo",

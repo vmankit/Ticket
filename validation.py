@@ -99,7 +99,10 @@ def validate_booking(form):
     pnr = (form.get("pnr") or "").strip().upper()
     if not pnr:
         errors.append("PNR / Booking Reference is required.")
-    elif not PNR_RE.match(pnr):
+    # A multi-segment itinerary merged from several bookings carries one PNR
+    # per segment, joined as "ABCD12 / WXYZ34" - each part must still look
+    # like a real PNR.
+    elif not all(PNR_RE.match(part.strip()) for part in pnr.split("/")):
         errors.append("PNR must be 4-10 letters or digits (no spaces or symbols).")
 
     if not (form.get("booking_platform") or "").strip():

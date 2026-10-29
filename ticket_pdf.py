@@ -6,6 +6,7 @@ large airport codes and times carry the page, so nothing else needs to shout.
 """
 
 import io
+import os
 import re
 from html import escape
 
@@ -17,6 +18,7 @@ from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.utils import ImageReader
 from reportlab.pdfgen import canvas as pdfcanvas
 from reportlab.platypus import Paragraph
+from PIL import Image as PILImage
 
 PAGE_W, PAGE_H = A4
 MM = 72 / 25.4
@@ -265,10 +267,20 @@ def draw_header(t, *, company, pnr, booking_id, status, show_agency=True):
         t.text(MARGIN + size / 2, t.at(LOGO_TOP_MM) - size / 2 - 3.5, initials or "JS",
                size=11, font=FONT_BOLD, color=white, align="center")
 
+    # The PNR block is measured before anything on the left is drawn: a
+    # merged itinerary carries one PNR per segment ("ABCD12 / WXYZ34"), which
+    # is wide enough to reach back over the agency's address unless the
+    # address is held to whatever room the code leaves.
+    pnr_text = pnr or "—"
+    pnr_size = 28.0
+    while pnr_size > 12 and t.c.stringWidth(pnr_text, FONT_BOLD, pnr_size) > CONTENT_W * 0.5:
+        pnr_size -= 0.5
+    agency_limit = right - t.c.stringWidth(pnr_text, FONT_BOLD, pnr_size) - 5.0 * MM
+
     wordmark = company["name"].upper() if show_agency else "E-TICKET"
     brand_x = (MARGIN + size + 3.0 * MM) if show_agency else MARGIN
     brand_size = 15.0
-    room = (PAGE_W - MARGIN - 38 * MM) - brand_x
+    room = agency_limit - brand_x
     while brand_size > 11 and t.c.stringWidth(wordmark, FONT_BOLD, brand_size) > room:
         brand_size -= 0.25
     t.text(brand_x, t.at(BRAND_BASE_MM), wordmark, size=brand_size, font=FONT_BOLD, color=INK)
@@ -292,16 +304,24 @@ def draw_header(t, *, company, pnr, booking_id, status, show_agency=True):
                 t.text(cursor_x - 1.5 * MM, sub_y, "·", size=9.0, font=FONT_BOLD, color=FAINT)
                 cursor_x += 2.0 * MM
         if addr:
-            max_w = (PAGE_W - MARGIN - 36 * MM) - cursor_x
+            max_w = agency_limit - cursor_x
             addr_size = 8.0
             while addr_size > 6.0 and t.c.stringWidth(addr, FONT, addr_size) > max_w:
                 addr_size -= 0.2
-            t.text(cursor_x, sub_y, addr, size=addr_size, font=FONT, color=MUTED)
+            # Still too long at the smallest readable size: trim it rather
+            # than let it run under the PNR.
+            if t.c.stringWidth(addr, FONT, addr_size) > max_w:
+                while addr and t.c.stringWidth(addr + "…", FONT, addr_size) > max_w:
+                    addr = addr[:-1].rstrip(" ,-")
+                addr += "…" if addr else ""
+            if addr:
+                t.text(cursor_x, sub_y, addr, size=addr_size, font=FONT, color=MUTED)
 
-    # PNR Block on the right
-    label_w = t.c.stringWidth("PNR", FONT_BOLD, 8) + 3 * 2.6
-    t.tracked(right - label_w, t.at(PNR_LABEL_BASE_MM), "PNR", size=8, tracking=2.6)
-    t.text(right, t.at(PNR_BASE_MM), pnr or "\u2014", size=28,
+    # PNR block on the right, at the size measured above.
+    pnr_label = "PNRs" if pnr and "/" in pnr else "PNR"
+    label_w = t.c.stringWidth(pnr_label, FONT_BOLD, 8) + 3 * 2.6
+    t.tracked(right - label_w, t.at(PNR_LABEL_BASE_MM), pnr_label, size=8, tracking=2.6)
+    t.text(right, t.at(PNR_BASE_MM), pnr_text, size=pnr_size,
            font=FONT_BOLD, color=INK, align="right")
 
     # Hairline divider between Branding and Ticket Metadata
@@ -552,13 +572,50 @@ def draw_passengers(t, passengers, flights):
     a wrapped name, or one sector per line on a multi-leg trip - which grows
     that row rather than overflowing it.
     """
-    for flight in flights:
-        if "_barcode_image" not in flight:
-            path = flight.get("barcode_path")
+    # Prepare barcodes: collect all unique barcode images across flights
+    barcode_imgs = []
+    for f in flights:
+        b_path = f.get("barcode_path")
+        if b_path and os.path.exists(b_path):
             try:
-                flight["_barcode_image"] = ImageReader(path) if path else None
+                pil_im = PILImage.open(b_path)
+                barcode_imgs.append(pil_im)
             except Exception:
-                flight["_barcode_image"] = None
+                pass
+
+    unified_barcode_reader = None
+    if len(barcode_imgs) == 1:
+        buf = io.BytesIO()
+        barcode_imgs[0].save(buf, format="PNG")
+        buf.seek(0)
+        unified_barcode_reader = ImageReader(buf)
+    elif len(barcode_imgs) > 1:
+        try:
+            # Normalize to a common HEIGHT, not width: barcodes extracted from a
+            # scanned PDF and ones generated fresh from a PNR have wildly
+            # different pixel aspect ratios, so matching width alone left one
+            # barcode looking squat and the other tall once stacked.
+            target_h = 90
+            resized = []
+            for im in barcode_imgs:
+                w, h = im.size
+                rw = max(10, int(w * (target_h / h))) if h > 0 else 50
+                resized.append(im.convert("RGB").resize((rw, target_h), PILImage.Resampling.LANCZOS))
+            gap = 6
+            max_w = max(im.size[0] for im in resized)
+            total_h = target_h * len(resized) + gap * (len(resized) - 1)
+            stacked = PILImage.new("RGB", (max_w, total_h), (255, 255, 255))
+            curr_y = 0
+            for im in resized:
+                x = (max_w - im.size[0]) // 2
+                stacked.paste(im, (x, curr_y))
+                curr_y += target_h + gap
+            buf = io.BytesIO()
+            stacked.save(buf, format="PNG")
+            buf.seek(0)
+            unified_barcode_reader = ImageReader(buf)
+        except Exception:
+            pass
 
     multi = len(flights) > 1
     table_w = CONTENT_W
@@ -576,20 +633,29 @@ def draw_passengers(t, passengers, flights):
             "cell", fontName=FONT_BOLD if bold else FONT,
             fontSize=size, leading=size + 2.6, textColor=color)
 
+    # Check if distinct segment PNRs exist across flights
+    has_distinct_pnrs = any(f.get("segment_pnr") for f in flights)
+
     rows = []
     for index, pax in enumerate(passengers):
         name = " ".join(part for part in (pax.get("title"), pax.get("name")) if part)
         sectors = "<br/>".join(f"{f.get('from_code')}-{f.get('to_code')}" for f in flights) \
-            if multi else f"{flights[0].get('from_code')}-{flights[0].get('to_code')}" if flights else "\u2014"
+            if multi else f"{flights[0].get('from_code')}-{flights[0].get('to_code')}" if flights else "—"
         seats = pax.get("seats_per_segment") or []
         meals = pax.get("meals_per_segment") or []
         seat_text = "<br/>".join(_fmt(s) for s in seats) if seats else _fmt(pax.get("seat"))
         meal_text = "<br/>".join(_fmt(m) for m in meals) if meals else _fmt(pax.get("meal"))
 
+        if has_distinct_pnrs and multi:
+            pnr_list = [f.get("segment_pnr") or pax.get("pnr") or "—" for f in flights]
+            pnr_text = "<br/>".join(escape(p) for p in pnr_list)
+        else:
+            pnr_text = escape(pax.get("pnr") or "—")
+
         cells = [
             (xs[0], widths[0], f"{index + 1}.&nbsp;&nbsp;{escape(name)}", True, INK, 10),
             (xs[1], widths[1], sectors, False, MUTED, 9),
-            (xs[2], widths[2], escape(pax.get("pnr") or "\u2014"), False, BODY, 9),
+            (xs[2], widths[2], pnr_text, False, BODY, 9),
             (xs[3], widths[3], seat_text, False, MUTED, 9),
             (xs[4], widths[4], meal_text, False, MUTED, 9),
         ]
@@ -597,11 +663,8 @@ def draw_passengers(t, passengers, flights):
         for x, width, html, bold, color, size in cells:
             _, h = Paragraph(html, cell_style(bold, size)).wrap(width - PAX_CELL_INSET_MM * MM, 200)
             tallest = max(tallest, h)
-        # One barcode per booking: the agent uploads it against a flight, and
-        # every passenger on that flight shows it.
-        barcode_image = next((f["_barcode_image"] for f in flights
-                              if f.get("_barcode_image")), None)
-        # The measured row fits one line; anything taller sets its own height.
+
+        barcode_image = unified_barcode_reader or next((f["_barcode_image"] for f in flights if f.get("_barcode_image")), None)
         rows.append((cells, max(PAX_ROW_H_MM * MM, tallest + 2 * (PAX_ROW_DY_MM - 2.9) * MM), barcode_image))
 
     def draw_chunk(chunk, top):

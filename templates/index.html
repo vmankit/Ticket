@@ -277,10 +277,10 @@
                 </div>
                 <div class="card-body">
                             <div class="upload-status" id="uploadStatus" style="padding:12px 14px; color:var(--text);">
-                                Upload a digital PDF e-ticket to auto-extract fields (scanned images may not work).
+                                Upload one or more digital PDF e-tickets to auto-extract and combine fields (e.g. connecting flights, separate PNRs).
                             </div>
                             <div class="upload-actions" style="margin-top:14px;align-items:center;gap:12px;flex-wrap:wrap;">
-                                <input type="file" id="ticketUpload" name="ticket_pdf" accept="application/pdf" style="padding:8px;">
+                                <input type="file" id="ticketUpload" name="ticket_pdf" accept="application/pdf" multiple style="padding:8px;">
                                 <button type="button" class="btn-generate" id="extractBtn" style="background:#0f2742;">Upload &amp; Parse PDF</button>
                                 <button type="button" class="btn-generate" id="sampleFillBtn" style="background:#666; box-shadow:0 12px 28px rgba(102,102,102,.2);">Fill Sample Ticket</button>
                             </div>
@@ -861,9 +861,11 @@ function addFlight(){
             </div>
         </div>
 
-        <!-- Hidden fields for formatted times -->
+        <!-- Hidden fields for formatted times and segment barcode -->
         <input type="hidden" name="flight_${i}_dep_time" id="fdep_fmt_${i}">
         <input type="hidden" name="flight_${i}_arr_time" id="farr_fmt_${i}">
+        <input type="hidden" name="flight_${i}_barcode_token" id="bc_token_${i}">
+        <input type="hidden" name="flight_${i}_barcode_data" id="bc_data_${i}">
     `;
     container.appendChild(seg);
 
@@ -1191,6 +1193,14 @@ function applyExtractedData(data){
         setSelectValue(document.querySelector(`[name="flight_${i}_checkin_bag"]`), f.checkin_bag);
         setSelectValue(document.querySelector(`[name="flight_${i}_hand_bag"]`), f.hand_bag);
         if(f.class)setSelectValue(document.querySelector(`[name="flight_${i}_class"]`), f.class);
+        if(f.barcode_token){
+            const bctEl=document.getElementById('bc_token_'+i);
+            if(bctEl) bctEl.value=f.barcode_token;
+        }
+        if(f.barcode_data){
+            const bcdEl=document.getElementById('bc_data_'+i);
+            if(bcdEl) bcdEl.value=f.barcode_data;
+        }
     });
     if(data.refund_status)setSelectValue(document.querySelector('[name="refund_status"]'), data.refund_status);
     if(data.fare_type)setSelectValue(document.querySelector('[name="fare_type"]'), data.fare_type);
@@ -1203,13 +1213,38 @@ function applyExtractedData(data){
 
     const existingBc = document.getElementById('autoBarcodeBanner');
     if(existingBc) existingBc.remove();
-    if(data.barcode_data){
+    
+    // Check if we have barcodes in flights or at top level
+    const barcodeItems = [];
+    if(Array.isArray(flights)){
+        flights.forEach((f, idx)=>{
+            if(f.barcode_data) {
+                barcodeItems.push({
+                    src: f.barcode_data,
+                    label: `Flight ${idx+1}${f.flight_no ? ' ('+f.flight_no+')' : ''}`
+                });
+            }
+        });
+    }
+    if(barcodeItems.length === 0 && data.barcode_data){
+        barcodeItems.push({ src: data.barcode_data, label: 'E-Ticket Barcode' });
+    }
+
+    if(barcodeItems.length > 0){
         const uploadStatus = document.getElementById('uploadStatus');
         if(uploadStatus){
             const banner = document.createElement('div');
             banner.id = 'autoBarcodeBanner';
-            banner.style.cssText = 'margin-top:12px; background:#f0fdf4; border:1px solid #86efac; border-radius:6px; padding:10px 14px; display:flex; align-items:center; gap:12px;';
-            banner.innerHTML = `<img src="${data.barcode_data}" style="height:34px; max-width:200px; object-fit:contain; border:1px solid #cbd5e1; background:#fff; padding:3px; border-radius:4px;"> <span style="color:#15803d; font-weight:700; font-size:13px;">✓ Barcode auto-fetched from PDF</span>`;
+            banner.style.cssText = 'margin-top:12px; background:#f0fdf4; border:1px solid #86efac; border-radius:6px; padding:10px 14px; display:flex; flex-wrap:wrap; align-items:center; gap:16px;';
+            
+            let imgsHtml = barcodeItems.map(item => `
+                <div style="display:flex; flex-direction:column; align-items:center; gap:4px;">
+                    <img src="${item.src}" style="height:36px; max-width:180px; object-fit:contain; border:1px solid #cbd5e1; background:#fff; padding:3px; border-radius:4px;">
+                    <span style="font-size:10px; color:#166534; font-weight:600;">${item.label}</span>
+                </div>
+            `).join('');
+
+            banner.innerHTML = `${imgsHtml} <span style="color:#15803d; font-weight:700; font-size:13px;">✓ ${barcodeItems.length > 1 ? barcodeItems.length + ' Barcodes auto-fetched from PDFs' : 'Barcode auto-fetched from PDF'}</span>`;
             uploadStatus.appendChild(banner);
         }
     }
@@ -1323,14 +1358,14 @@ if(extractBtn){
     extractBtn.addEventListener('click',async()=>{
         const statusEl=document.getElementById('uploadStatus');
         const fileInput=document.getElementById('ticketUpload');
-        const file=fileInput&&fileInput.files?fileInput.files[0]:null;
-        if(!file){statusEl.textContent='Please select a PDF first.';return;}
-        statusEl.textContent='Extracting ticket details...';
+        const files=fileInput&&fileInput.files?Array.from(fileInput.files):[];
+        if(!files.length){statusEl.textContent='Please select at least one PDF first.';return;}
+        statusEl.textContent=files.length > 1 ? `Extracting & merging ${files.length} tickets...` : 'Extracting ticket details...';
         const extractHTML=extractBtn.innerHTML;
         extractBtn.disabled=true;
         extractBtn.innerHTML='<span class="spinner"></span> Parsing...';
         const form=new FormData();
-        form.append('ticket_pdf',file);
+        files.forEach(f => form.append('ticket_pdf', f));
         try{
             // CSRFProtect guards every POST, so the token must ride along or
             // the upload is rejected before it reaches the parser.

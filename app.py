@@ -64,6 +64,7 @@ from ticket_parsing import (
     normalize_baggage_label,
     parse_regional_ticket,
     parse_indigo_itinerary,
+    parse_maha_or_b2b_portal,
 )
 from validation import (
     parse_money,
@@ -678,6 +679,13 @@ def _extract_ticket_fields(text, filename="", pages_words=None):
             bp["booking_platform"] = platform or bp.get("booking_platform") or "Direct"
             return bp
 
+    # B2B portal / MAHA tickets (Booking Reference F-O..., TRAVELERS DETAILS, AIRLINE PNR)
+    if "TRAVELERS DETAILS" in text_upper or ("BOOKING REFERENCE" in text_upper and "AIRLINE PNR" in text_upper) or "MAHA" in text_upper:
+        maha = parse_maha_or_b2b_portal(text)
+        if maha and (maha.get("pnr") or maha.get("flights")):
+            maha["booking_platform"] = platform or "Direct/Walk-in"
+            return maha
+
     # Some agency tickets lay the itinerary out as a real table. Flattened to
     # text those columns interleave, so they are read from word positions
     # instead - but only when that table is actually present.
@@ -1218,50 +1226,22 @@ def next_booking_id():
     return jsonify({"booking_id": get_next_booking_id(platform_code)})
 
 
-@app.route("/api/parse-ticket", methods=["POST"])
-def parse_ticket():
-    if "ticket_pdf" not in request.files:
-        return jsonify({"error": "No file uploaded."}), 400
-
-    upload = request.files["ticket_pdf"]
-    if not upload or not upload.filename:
-        return jsonify({"error": "No file selected."}), 400
-
-    filename = upload.filename
-    if not filename.lower().endswith(".pdf"):
-        return jsonify({"error": "Only PDF files are supported."}), 400
-
-    if request.content_length and request.content_length > 15 * 1024 * 1024:
-        return jsonify({"error": "File too large. Max 15MB."}), 400
-
-    # Validate PDF magic bytes (security check)
-    pdf_header = upload.read(4)
-    upload.seek(0)
-    if pdf_header != b"%PDF":
-        return jsonify({"error": "Invalid PDF file. File does not start with PDF header."}), 400
-
+def _parse_single_pdf_bytes(data, filename):
     try:
         import pdfplumber
     except ImportError:
-        return jsonify({"error": "pdfplumber is not installed. Run: pip install -r requirements.txt"}), 500
+        return {"error": "pdfplumber is not installed. Run: pip install -r requirements.txt"}, 500
 
     try:
-        data = upload.read()
         pages_words = []
         with pdfplumber.open(io.BytesIO(data)) as pdf:
             pages = [page.extract_text() or "" for page in pdf.pages]
-            # Word boxes as well as text: a table's columns only survive as
-            # coordinates, and flattening them to lines scrambles the rows.
             pages_words = [page.extract_words() or [] for page in pdf.pages]
         text = "\n".join(pages).strip()
     except Exception as exc:
         log.error("Failed to read PDF: %s", exc)
-        return jsonify({"error": f"Failed to read PDF: {exc}"}), 500
+        return {"error": f"Failed to read PDF {filename}: {exc}"}, 500
 
-    # Too little embedded text means the pages are images, so read them with OCR.
-    # A page that carries real text keeps it: OCR is slower and never better
-    # than the characters the PDF already states, so only the scanned pages of
-    # a mixed document are recognised.
     used_ocr = False
     ocr_conf = None
     blank_pages = {i for i, page in enumerate(pages) if len(page) < OCR_PAGE_TEXT_FLOOR}
@@ -1276,7 +1256,6 @@ def parse_ticket():
             merged, merged_words = list(pages), list(pages_words)
             for page in ocr_pages:
                 i = page["index"]
-                # Keep whichever version of the page says more.
                 if i < len(merged) and len(merged[i]) >= max(len(page["text"]), OCR_PAGE_TEXT_FLOOR):
                     continue
                 while len(merged) <= i:
@@ -1288,8 +1267,6 @@ def parse_ticket():
                 text = "\n".join(merged).strip()
                 pages, pages_words = merged, merged_words
                 ocr_conf = round(sum(p["conf"] for p in ocr_pages) / len(ocr_pages), 1)
-                log.info("OCR recovered %d chars from %s (mean confidence %.1f%%)",
-                         len(text), filename, ocr_conf)
 
     if len(text) < 50:
         vision_res = extract_ticket_with_gemini_vision(data, filename=filename)
@@ -1307,75 +1284,132 @@ def parse_ticket():
                     f["checkin_bag"] = "15 KG (1 Piece)"
                 if not f.get("hand_bag"):
                     f["hand_bag"] = "7 KG (1 Piece)"
-            log.info("Returning Gemini vision parsed ticket for %s", filename)
-            return jsonify(vision_res)
+            return vision_res, 200
 
         if not ocr_available():
-            log.warning("Scanned PDF and OCR is unavailable: %s", filename)
-            return jsonify({
-                "error": "This looks like a scanned or photographed ticket, and text "
-                         "recognition is not installed on the server. Please fill the "
-                         "form manually, or upload the original digital PDF.",
-            }), 422
-        log.warning("OCR could not read %s", filename)
-        return jsonify({
-            "error": "This looks like a scanned ticket, but the text could not be read. "
-                     "Try a clearer scan or the original digital PDF, or fill the form manually.",
-        }), 422
-
-    log.info("Processing %s - %d chars%s", filename, len(text), " via OCR" if used_ocr else "")
+            return {
+                "error": f"Scanned ticket {filename} and OCR is unavailable on server.",
+            }, 422
+        return {
+            "error": f"Scanned ticket {filename} could not be read.",
+        }, 422
 
     extracted = extract_ticket_fields(text, filename=filename, pages_words=pages_words)
-
     if used_ocr:
         extracted = _second_opinion(data, extracted, filename)
-
-    if not extracted.get("pnr") and not extracted.get("booking_id") and not extracted.get("flights"):
-        if not extracted.get("booking_platform"):
-            # Distinguish "this isn't a ticket" from "it is, but unreadable" —
-            # they need different things from the user.
-            ticket_markers = ("PNR", "FLIGHT", "PASSENGER", "BOARDING", "AIRLINE", "DEPART")
-            hits = sum(1 for marker in ticket_markers if marker in text.upper())
-            if hits < 2:
-                log.warning("Upload does not look like a ticket: %s", filename)
-                return jsonify({
-                    "error": "This file does not look like a flight ticket. "
-                             "Upload the e-ticket PDF you received from the airline or booking site.",
-                }), 422
-            log.warning("Ticket recognised but no booking details could be read.")
-            return jsonify({
-                "error": "This looks like a ticket, but the booking details could not be read "
-                         "automatically. Please fill the form manually.",
-                "raw_text_available": True,
-            }), 422
-        else:
-            # Platform detected but no booking ID/PNR found
-            log.info("Platform %s detected but booking ID/PNR missing", extracted.get("booking_platform"))
-    
-    if used_ocr:
-        # A scan is a best guess, not a statement of fact. Tell the front end
-        # so it can ask for a second look when the reading was poor.
         extracted["used_ocr"] = True
         extracted["ocr_confidence"] = ocr_conf
-    extracted["raw_excerpt"] = text[:1200]
-    if extracted.get("booking_platform"):
-        log.info(
-            "Extracted platform=%s pnr=%s booking_id=%s",
-            extracted.get("booking_platform"), extracted.get("pnr"), extracted.get("booking_id"),
-        )
-    else:
-        log.info("PDF parsed but platform not recognised; manual entry may be needed.")
 
-    # ── Auto-fetch barcode from PDF ──────────────────────────
+    extracted["raw_excerpt"] = text[:1200]
+
+    # Barcode
     bc_path, bc_data = extract_barcode_from_pdf_bytes(data)
     if not bc_path and extracted.get("pnr"):
         bc_path, bc_data = generate_code128_barcode(extracted.get("pnr"))
     if bc_path:
         extracted["barcode_token"] = bc_path
         extracted["barcode_data"] = bc_data
-        log.info("Auto-fetched barcode for %s (token=%s)", filename, bc_path)
 
-    return jsonify(extracted)
+    return extracted, 200
+
+
+@app.route("/api/parse-ticket", methods=["POST"])
+def parse_ticket():
+    files = request.files.getlist("ticket_pdf")
+    if not files or all(not f or not f.filename for f in files):
+        return jsonify({"error": "No file selected."}), 400
+
+    valid_uploads = [f for f in files if f and f.filename and f.filename.lower().endswith(".pdf")]
+    if not valid_uploads:
+        return jsonify({"error": "Only PDF files are supported."}), 400
+
+    results = []
+    for upload in valid_uploads:
+        pdf_header = upload.read(4)
+        upload.seek(0)
+        if pdf_header != b"%PDF":
+            return jsonify({"error": f"Invalid PDF file {upload.filename}. Does not start with %PDF."}), 400
+        
+        data = upload.read()
+        extracted, status_code = _parse_single_pdf_bytes(data, upload.filename)
+        if status_code != 200:
+            if len(valid_uploads) == 1:
+                return jsonify(extracted), status_code
+            log.warning("Skipping failed parse for %s: %s", upload.filename, extracted)
+            continue
+        results.append(extracted)
+
+    if not results:
+        return jsonify({"error": "Could not extract booking details from the uploaded PDF(s)."}), 422
+
+    if len(results) == 1:
+        return jsonify(results[0])
+
+    # ── Merge multiple parsed tickets into a single multi-segment ticket ──
+    merged = dict(results[0])
+    all_flights = []
+    all_pnrs = []
+    total_base = 0.0
+    total_taxes = 0.0
+    total_fare = 0.0
+    has_fare = False
+
+    for res in results:
+        pnr_val = res.get("pnr", "").strip()
+        if pnr_val and pnr_val not in all_pnrs:
+            all_pnrs.append(pnr_val)
+
+        res_flights = res.get("flights") or []
+        for fl in res_flights:
+            fl_copy = dict(fl)
+            if pnr_val and not fl_copy.get("segment_pnr"):
+                fl_copy["segment_pnr"] = pnr_val
+            # Each source ticket's barcode was captured at a different
+            # resolution (one scanned out of a PDF, another generated fresh),
+            # so stacking them as-is leaves one looking bigger than the
+            # other. Regenerating every segment's barcode from its own PNR
+            # keeps all of them the same size on a merged itinerary.
+            gen_path, gen_data = generate_code128_barcode(fl_copy.get("segment_pnr") or pnr_val or merged.get("pnr", ""))
+            if gen_path:
+                fl_copy["barcode_token"] = gen_path
+                fl_copy["barcode_data"] = gen_data
+            all_flights.append(fl_copy)
+
+        try:
+            b = float(res.get("base_fare") or 0)
+            t = float(res.get("taxes_fees") or 0)
+            tot = float(res.get("total_fare") or 0)
+            if tot > 0 or b > 0:
+                has_fare = True
+                total_base += b
+                total_taxes += t
+                total_fare += tot
+        except (ValueError, TypeError):
+            pass
+
+    # Tickets are merged in whichever order they were uploaded, which is not
+    # necessarily the order they are flown. Sorting the segments by departure
+    # and rebuilding the PNR list from that same order keeps the codes in the
+    # header lined up with the per-segment rows in the passenger table.
+    all_flights.sort(key=lambda f: (f.get("date") or "", f.get("dep_time_raw") or ""))
+    ordered_pnrs = []
+    for fl in all_flights:
+        code = (fl.get("segment_pnr") or "").strip()
+        if code and code not in ordered_pnrs:
+            ordered_pnrs.append(code)
+    if ordered_pnrs:
+        all_pnrs = ordered_pnrs
+
+    merged["flights"] = all_flights
+    if all_pnrs:
+        merged["pnr"] = " / ".join(all_pnrs)
+    if has_fare:
+        merged["base_fare"] = str(round(total_base, 2))
+        merged["taxes_fees"] = str(round(total_taxes, 2))
+        merged["total_fare"] = str(round(total_fare, 2))
+
+    log.info("Merged %d tickets: %d flights, PNRs: %s", len(results), len(all_flights), merged.get("pnr"))
+    return jsonify(merged)
 
 
 @app.route("/api/ai-prompt", methods=["GET"])
@@ -2163,6 +2197,20 @@ def generate_ticket():
             # Log error but don't fail entire PDF generation
             log.warning("Layover calculation error: %s", e)
             continue
+
+    # The header prints the PNRs as one string while the passenger table
+    # prints one per segment, so the two have to agree on order. Re-sort the
+    # submitted string into segment order, but only when it holds exactly the
+    # same codes - a single master PNR alongside per-leg codes is left alone.
+    submitted_pnrs = [part.strip().upper() for part in pnr.split("/") if part.strip()]
+    if len(submitted_pnrs) > 1:
+        segment_order = []
+        for flight in flights:
+            code = (flight.get("segment_pnr") or "").strip().upper()
+            if code and code not in segment_order:
+                segment_order.append(code)
+        if sorted(segment_order) == sorted(submitted_pnrs):
+            pnr = " / ".join(segment_order)
 
     # ── Parse multiple passengers ────────────────────────────
     passengers = []

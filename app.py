@@ -46,6 +46,7 @@ from ticket_pdf import (
 )
 from ticket_parsing import (
     STANDARD_AIRLINES,
+    STANDARD_AIRLINE_COLORS,
     looks_like_own_ticket,
     normalize_text,
     OCR_PAGE_TEXT_FLOOR,
@@ -163,6 +164,7 @@ COMPANY = AGENCIES[DEFAULT_AGENCY_ID]
 # Single source of truth lives in ticket_parsing.STANDARD_AIRLINES, so the
 # parsers and the rest of the app always agree on which carriers exist.
 AIRLINES = dict(STANDARD_AIRLINES)
+AIRLINE_COLORS = dict(STANDARD_AIRLINE_COLORS)
 
 # ICAO / common 3-letter aliases mapped to their IATA code.
 # This lets entries like "AIX 123" resolve the same way as "IX 123".
@@ -226,7 +228,11 @@ def airline_payload():
         return _AIRLINE_PAYLOAD_CACHE
     
     payload = {
-        code: {"name": name, "iata": code}
+        code: {
+            "name": name,
+            "iata": code,
+            "color": AIRLINE_COLORS.get(code, "#0F2742"),
+        }
         for code, name in AIRLINES.items()
     }
     for alias, iata in AIRLINE_ALIASES.items():
@@ -235,6 +241,7 @@ def airline_payload():
                 "name": AIRLINES[iata],
                 "iata": iata,
                 "alias_of": iata,
+                "color": AIRLINE_COLORS.get(iata, "#0F2742"),
             }
     
     _AIRLINE_PAYLOAD_CACHE = payload

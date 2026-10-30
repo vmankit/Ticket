@@ -947,7 +947,8 @@ function detectAirline(input,idx){
         alInput.classList.add('auto-field');
         if(alTag)alTag.hidden=false;
         const codeLabel=info.iata&&info.iata!==prefix?`${prefix} / ${info.iata}`:prefix;
-        helper.textContent=`✓ ${info.name} (${codeLabel})`;
+        const color=info.color||'#0F2742';
+        helper.innerHTML=`<span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${color};margin-right:6px;vertical-align:1px;box-shadow:0 0 0 1px rgba(0,0,0,0.1);"></span>✓ ${info.name} (${codeLabel})`;
         helper.className='helper detected';
     }
     else{

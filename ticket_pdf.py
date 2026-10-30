@@ -437,6 +437,77 @@ def _flight_path(t, x0, x1, y, arc_lift, plane_y, duration):
         t.text((x0 + x1) / 2, y - 5.3 * MM, duration, size=8.5, color=MUTED, align="center")
 
 
+def _badge_text_color(brand_color_hex):
+    """Determine whether to use white or dark text for the fallback badge.
+
+    Calculates WCAG relative luminance so any brand colour meets contrast standards.
+    """
+    hex_clean = (brand_color_hex or "").lstrip("#")
+    if len(hex_clean) == 6:
+        try:
+            r = int(hex_clean[0:2], 16) / 255.0
+            g = int(hex_clean[2:4], 16) / 255.0
+            b = int(hex_clean[4:6], 16) / 255.0
+            r_lin = r / 12.92 if r <= 0.04045 else ((r + 0.055) / 1.055) ** 2.4
+            g_lin = g / 12.92 if g <= 0.04045 else ((g + 0.055) / 1.055) ** 2.4
+            b_lin = b / 12.92 if b <= 0.04045 else ((b + 0.055) / 1.055) ** 2.4
+            lum = 0.2126 * r_lin + 0.7152 * g_lin + 0.0722 * b_lin
+            if lum > 0.179:
+                return INK
+        except ValueError:
+            pass
+    return white
+
+
+def _get_airline_logo(code):
+    """Safely load local airline logo PNG at static/airline_logos/<IATA>.png.
+
+    Returns (ImageReader, orig_w, orig_h) if a valid image is present,
+    or (None, 0, 0) if missing, zero-byte, corrupt, or invalid.
+    Performs zero network requests.
+    """
+    if not code or code == "--":
+        return None, 0, 0
+    clean_code = str(code).strip().upper()
+    logo_path = os.path.join(os.path.dirname(__file__), "static", "airline_logos", f"{clean_code}.png")
+    if not os.path.isfile(logo_path):
+        return None, 0, 0
+    try:
+        if os.path.getsize(logo_path) == 0:
+            return None, 0, 0
+        with PILImage.open(logo_path) as im:
+            im.verify()
+        with PILImage.open(logo_path) as im:
+            orig_w, orig_h = im.size
+            if orig_w <= 0 or orig_h <= 0:
+                return None, 0, 0
+        return ImageReader(logo_path), orig_w, orig_h
+    except Exception:
+        return None, 0, 0
+
+
+def _find_airline_code(flight):
+    """Determine the carrier code from flight dict, flight number or airline name."""
+    try:
+        from ticket_parsing import STANDARD_AIRLINES
+    except ImportError:
+        STANDARD_AIRLINES = {}
+    code = (flight.get("airline_code") or "").strip().upper()
+    if code and code != "--":
+        return code[:2]
+    # Try from flight_no
+    fn = re.sub(r"[^A-Z0-9]", "", (flight.get("flight_no") or "").upper())
+    if len(fn) >= 2 and fn[:2] in STANDARD_AIRLINES:
+        return fn[:2]
+    # Try reverse match airline name
+    airline_name = (flight.get("airline") or "").strip().lower()
+    if airline_name:
+        for c, name in STANDARD_AIRLINES.items():
+            if name.lower() == airline_name:
+                return c
+    return code[:2] if code else ""
+
+
 def draw_flight(t, flight, index, total):
     """One itinerary card: route, times and the connecting flight path.
 
@@ -473,25 +544,57 @@ def draw_flight(t, flight, index, total):
     t.c.rect(MARGIN, head_bottom, CONTENT_W, HEAD_H_MM * MM / 2, stroke=0, fill=1)
     t.c.restoreState()
 
-    # A monochrome code badge rather than the carrier's logo: it keeps the
-    # ticket to one palette, and needs no third-party image to load.
-    code = (flight.get("airline_code") or "")[:2].upper() or "--"
+    # Airline logo with safe fallback to brand-coloured circle badge
+    code = _find_airline_code(flight)
     badge_base = below(BADGE_BASE_MM)
     badge_cx = MARGIN + 8.55 * MM
-    t.c.setFillColor(INK)
-    t.c.circle(badge_cx, badge_base + 2.2, 2.9 * MM, stroke=0, fill=1)
-    t.text(badge_cx, badge_base, code, size=6.5, font=FONT_BOLD,
-           color=white, align="center")
+    badge_cy = badge_base + 2.2
+    badge_box = 2 * 2.9 * MM  # 5.8mm footprint matching the 2.9mm radius circle
 
-    airline = (flight.get("airline") or "").upper()
-    title = f"{airline}  \u00b7  {flight.get('flight_no', '')}".strip(" \u00b7")
-    t.text(MARGIN + 13.8 * MM, badge_base, title, size=9, font=FONT_BOLD, color=INK)
+    reader, orig_w, orig_h = _get_airline_logo(code)
+    logo_drawn = False
+
+    if reader:
+        try:
+            scale = min(badge_box / orig_w, badge_box / orig_h)
+            w = orig_w * scale
+            h = orig_h * scale
+            x = badge_cx - w / 2
+            y = badge_cy - h / 2
+            t.c.drawImage(reader, x, y, width=w, height=h, mask="auto", preserveAspectRatio=True)
+            logo_drawn = True
+        except Exception:
+            logo_drawn = False
+
+    if not logo_drawn:
+        try:
+            from ticket_parsing import STANDARD_AIRLINE_COLORS
+            brand_color_hex = STANDARD_AIRLINE_COLORS.get(code, "#0F2742")
+        except Exception:
+            brand_color_hex = "#0F2742"
+
+        t.c.setFillColor(HexColor(brand_color_hex))
+        t.c.circle(badge_cx, badge_cy, 2.9 * MM, stroke=0, fill=1)
+        badge_text_color = _badge_text_color(brand_color_hex)
+        t.text(badge_cx, badge_base, code or "--", size=6.5, font=FONT_BOLD,
+               color=badge_text_color, align="center")
+
+    title_x = MARGIN + 13.8 * MM
 
     travel_class = (flight.get("class") or "Economy").upper()
     pill_h = 5.5 * MM
     pill_w = t.c.stringWidth(travel_class, FONT_BOLD, 8) + 2 * 3.2 * MM
-    t.pill(PAGE_W - MARGIN - 5.6 * MM - pill_w, below(BADGE_BASE_MM + 2.1) , travel_class,
+    pill_x = PAGE_W - MARGIN - 5.6 * MM - pill_w
+    t.pill(pill_x, below(BADGE_BASE_MM + 2.1), travel_class,
            size=8, pad=3.2 * MM, height=pill_h)
+
+    airline = (flight.get("airline") or "").upper()
+    title = f"{airline}  \u00b7  {flight.get('flight_no', '')}".strip(" \u00b7")
+    title_size = 9.0
+    available_w = pill_x - title_x - 3 * MM
+    while title_size > 7.0 and t.c.stringWidth(title, FONT_BOLD, title_size) > available_w:
+        title_size -= 0.5
+    t.text(title_x, badge_base, title, size=title_size, font=FONT_BOLD, color=INK)
 
     # Perforation, with a notch punched out of each edge.
     t.rule(MARGIN + 1.5 * MM, head_bottom, CONTENT_W - 3 * MM, dash=(2.1 * MM, 1.6 * MM),

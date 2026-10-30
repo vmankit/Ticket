@@ -1712,6 +1712,209 @@ STANDARD_AIRLINES = {
 }
 
 
+# Signature brand colors for all 190 standard airlines.
+# Used for crisp, vector-rendered airline badges on tickets without needing external image assets.
+STANDARD_AIRLINE_COLORS = {
+    # India
+    "6E": "#002B66",  # IndiGo
+    "AI": "#ED1B24",  # Air India
+    "UK": "#581138",  # Vistara
+    "SG": "#E31837",  # SpiceJet
+    "G8": "#003366",  # Go First
+    "QP": "#FF6600",  # Akasa Air
+    "I5": "#ED1C24",  # AirAsia India
+    "IX": "#D2232A",  # Air India Express
+    "S5": "#0A2540",  # Star Air
+    "2T": "#1E3D59",  # TruJet
+    "9I": "#003399",  # Alliance Air
+    "8Y": "#0055A5",  # Pan Pacific Airlines
+    "E5": "#ED1C24",  # Air Arabia India
+    # Middle East
+    "EK": "#D71A21",  # Emirates
+    "EY": "#A07E44",  # Etihad Airways
+    "QR": "#5C0632",  # Qatar Airways
+    "FZ": "#F26522",  # flydubai
+    "WY": "#A71930",  # Oman Air
+    "GF": "#8C6D37",  # Gulf Air
+    "SV": "#006837",  # Saudia
+    "XY": "#602D89",  # flynas
+    "G9": "#E21836",  # Air Arabia
+    "KU": "#003366",  # Kuwait Airways
+    "RJ": "#7B1113",  # Royal Jordanian
+    "ME": "#003876",  # Middle East Airlines
+    "F3": "#00A4A6",  # flyadeal
+    "J9": "#005BAA",  # Jazeera Airways
+    "OV": "#6D1D43",  # SalamAir
+    "3L": "#E21836",  # Air Arabia Abu Dhabi
+    "IY": "#1B365D",  # Yemenia
+    "NE": "#004B87",  # Nesma Airlines
+    "LY": "#00205B",  # El Al
+    "W5": "#1D3A6C",  # Mahan Air
+    "IR": "#1C3F77",  # Iran Air
+    "EP": "#003B70",  # Iran Aseman Airlines
+    # Asia-Pacific
+    "SQ": "#00205B",  # Singapore Airlines
+    "TG": "#4B1869",  # Thai Airways
+    "MH": "#003399",  # Malaysia Airlines
+    "GA": "#00728F",  # Garuda Indonesia
+    "CX": "#006564",  # Cathay Pacific
+    "PR": "#002B66",  # Philippine Airlines
+    "VN": "#005B94",  # Vietnam Airlines
+    "KE": "#005599",  # Korean Air
+    "OZ": "#8C1D40",  # Asiana Airlines
+    "NH": "#003399",  # ANA (All Nippon Airways)
+    "JL": "#CC0000",  # Japan Airlines
+    "CI": "#C8102E",  # China Airlines
+    "BR": "#006838",  # EVA Air
+    "CZ": "#0065B3",  # China Southern Airlines
+    "MU": "#00205B",  # China Eastern Airlines
+    "CA": "#CC0000",  # Air China
+    "HU": "#C8102E",  # Hainan Airlines
+    "3K": "#FF5F00",  # Jetstar Asia
+    "TR": "#FFE600",  # Scoot
+    "AK": "#ED1C24",  # AirAsia
+    "FD": "#ED1C24",  # Thai AirAsia
+    "QZ": "#ED1C24",  # Indonesia AirAsia
+    "VJ": "#DA251D",  # VietJet Air
+    "QH": "#005C29",  # Bamboo Airways
+    "PG": "#004B87",  # Bangkok Airways
+    "SL": "#ED1C24",  # Thai Lion Air
+    "DD": "#FFDE00",  # Nok Air
+    "VZ": "#DA251D",  # Thai Vietjet Air
+    "JT": "#ED1C24",  # Lion Air
+    "ID": "#800000",  # Batik Air Indonesia
+    "OD": "#800000",  # Batik Air Malaysia
+    "FY": "#E26D00",  # Firefly
+    "BI": "#FBB800",  # Royal Brunei Airlines
+    "5J": "#FFCC00",  # Cebu Pacific
+    "Z2": "#ED1C24",  # Philippines AirAsia
+    "MM": "#EB4B94",  # Peach Aviation
+    "7C": "#FF5000",  # Jeju Air
+    "LJ": "#86C824",  # Jin Air
+    "TW": "#D60815",  # T'way Air
+    "BX": "#00256C",  # Air Busan
+    "9C": "#007E3A",  # Spring Airlines
+    "HO": "#8A1538",  # Juneyao Air
+    "MF": "#004A99",  # XiamenAir
+    "SC": "#C41230",  # Shandong Airlines
+    "ZH": "#CC0000",  # Shenzhen Airlines
+    "3U": "#D2232A",  # Sichuan Airlines
+    "HX": "#C41230",  # Hong Kong Airlines
+    "UO": "#45186E",  # HK Express
+    "GK": "#FF5F00",  # Jetstar Japan
+    "8M": "#B82025",  # Myanmar Airways International
+    "UB": "#D49B00",  # Myanmar National Airlines
+    "QV": "#003399",  # Lao Airlines
+    "K6": "#004B87",  # Cambodia Angkor Air
+    # South Asia
+    "UL": "#00703C",  # SriLankan Airlines
+    "RA": "#DC143C",  # Nepal Airlines
+    "BG": "#006A4E",  # Biman Bangladesh Airlines
+    "PK": "#004D25",  # Pakistan International Airlines
+    "BS": "#E31E24",  # US-Bangla Airlines
+    "KB": "#E87722",  # Drukair
+    "B3": "#0057B7",  # Bhutan Airlines
+    "U4": "#006633",  # Buddha Air
+    "YT": "#005A36",  # Yeti Airlines
+    "H9": "#003366",  # Himalaya Airlines
+    "Q2": "#006699",  # Maldivian
+    "9P": "#006B3F",  # Fly Jinnah
+    "PA": "#00447C",  # Airblue
+    # Europe
+    "BA": "#075AAA",  # British Airways
+    "LH": "#051039",  # Lufthansa
+    "AF": "#002157",  # Air France
+    "KL": "#00A1DE",  # KLM Royal Dutch Airlines
+    "LX": "#D81E05",  # SWISS
+    "OS": "#D81E05",  # Austrian Airlines
+    "AZ": "#003399",  # ITA Airways
+    "IB": "#D71920",  # Iberia
+    "SK": "#000066",  # SAS Scandinavian Airlines
+    "AY": "#0B1560",  # Finnair
+    "TK": "#C8102E",  # Turkish Airlines
+    "LO": "#002B66",  # LOT Polish Airlines
+    "TP": "#009639",  # TAP Air Portugal
+    "EI": "#006272",  # Aer Lingus
+    "SN": "#1E234C",  # Brussels Airlines
+    "RO": "#002B66",  # TAROM
+    "JU": "#0C2340",  # Air Serbia
+    "OU": "#003366",  # Croatia Airlines
+    "FR": "#003580",  # Ryanair
+    "U2": "#FF6600",  # easyJet
+    "W6": "#C6007E",  # Wizz Air
+    "VY": "#F6B400",  # Vueling
+    "DY": "#D81921",  # Norwegian Air
+    "VS": "#D81921",  # Virgin Atlantic
+    "PC": "#E30613",  # Pegasus Airlines
+    "XQ": "#FA5000",  # SunExpress
+    "A3": "#00205B",  # Aegean Airlines
+    "EW": "#762243",  # Eurowings
+    "HV": "#00D66C",  # Transavia
+    "BT": "#97D700",  # airBaltic
+    "FI": "#00205B",  # Icelandair
+    "OK": "#C8102E",  # Czech Airlines
+    "LG": "#00A3E0",  # Luxair
+    "DE": "#FFC72C",  # Condor
+    "X3": "#ED1C24",  # TUI fly
+    "LS": "#ED1C24",  # Jet2
+    "EN": "#003366",  # Air Dolomiti
+    "WF": "#005A36",  # Widerøe
+    "SU": "#002F6C",  # Aeroflot
+    "S7": "#A3C824",  # S7 Airlines
+    "U6": "#004B87",  # Ural Airlines
+    "UT": "#003366",  # UTair
+    "KC": "#C89A3C",  # Air Astana
+    "HY": "#003366",  # Uzbekistan Airways
+    "J2": "#004B87",  # Azerbaijan Airlines
+    "PS": "#005BAA",  # Ukraine International Airlines
+    "B2": "#0054A6",  # Belavia
+    "A9": "#8B0000",  # Georgian Airways
+    # Americas
+    "AA": "#0078D2",  # American Airlines
+    "UA": "#005DAA",  # United Airlines
+    "DL": "#E01933",  # Delta Air Lines
+    "WN": "#304CB2",  # Southwest Airlines
+    "B6": "#003876",  # JetBlue Airways
+    "AS": "#01426A",  # Alaska Airlines
+    "NK": "#FFE600",  # Spirit Airlines
+    "F9": "#006643",  # Frontier Airlines
+    "HA": "#4F2683",  # Hawaiian Airlines
+    "AC": "#D8232A",  # Air Canada
+    "AM": "#0B2341",  # Aeromexico
+    "LA": "#1B0088",  # LATAM Airlines
+    "AV": "#D8232A",  # Avianca
+    "CM": "#003366",  # Copa Airlines
+    "G3": "#FF671B",  # Gol Linhas Aéreas
+    "WS": "#009999",  # WestJet
+    "PD": "#1E2D3D",  # Porter Airlines
+    "TS": "#0085CA",  # Air Transat
+    "SY": "#FF6600",  # Sun Country Airlines
+    "Y4": "#A30076",  # Volaris
+    "VB": "#008F4C",  # Viva Aerobus
+    "AR": "#0072CE",  # Aerolíneas Argentinas
+    "AD": "#003366",  # Azul Brazilian Airlines
+    # Oceania & Africa
+    "QF": "#E0001B",  # Qantas
+    "NZ": "#000000",  # Air New Zealand
+    "VA": "#D71920",  # Virgin Australia
+    "JQ": "#FF5F00",  # Jetstar
+    "ET": "#008542",  # Ethiopian Airlines
+    "SA": "#002B49",  # South African Airways
+    "MS": "#002B66",  # EgyptAir
+    "KQ": "#CC0000",  # Kenya Airways
+    "AT": "#C8102E",  # Royal Air Maroc
+    "WB": "#0066B2",  # RwandAir
+    "FJ": "#003366",  # Fiji Airways
+    "PX": "#CC0000",  # Air Niugini
+    "TU": "#C8102E",  # Tunisair
+    "AH": "#C8102E",  # Air Algérie
+    "MK": "#C8102E",  # Air Mauritius
+    "HM": "#E31B23",  # Air Seychelles
+    "TC": "#008080",  # Air Tanzania
+    "DT": "#C8102E",  # TAAG Angola Airlines
+}
+
+
 def _resolve_airline(code_or_flight):
     m = re.match(r"^([A-Z0-9]{2,3})", (code_or_flight or "").strip().upper())
     if m:

@@ -1,4 +1,4 @@
-from flask import Flask, g, render_template, request, send_file, jsonify, render_template_string
+from flask import Flask, g, render_template, request, send_file, jsonify, render_template_string, session, redirect, url_for
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.colors import HexColor, black, white
 from reportlab.platypus import Table, TableStyle, Paragraph, Spacer, Image
@@ -7,6 +7,7 @@ from reportlab.pdfgen import canvas
 from reportlab.graphics.barcode.code128 import Code128
 import ast
 import base64
+import hmac
 import io
 import json
 import logging
@@ -132,6 +133,25 @@ from validation import (
     validate_passengers,
 )
 
+
+def load_local_env():
+    env_path = os.path.join(os.path.dirname(__file__), ".env")
+    if not os.path.exists(env_path):
+        return
+    with open(env_path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            key = key.strip()
+            value = value.strip().strip('"').strip("'")
+            if key and key not in os.environ:
+                os.environ[key] = value
+
+
+load_local_env()
+
 logging.basicConfig(
     level=os.environ.get("LOG_LEVEL", "INFO").upper(),
     format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
@@ -173,23 +193,61 @@ else:
     print("[WARN] CSRF protection disabled (flask_wtf not installed)")
 
 
-def load_local_env():
-    env_path = os.path.join(os.path.dirname(__file__), ".env")
-    if not os.path.exists(env_path):
-        return
-    with open(env_path, "r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            key, value = line.split("=", 1)
-            key = key.strip()
-            value = value.strip().strip('"').strip("'")
-            if key and key not in os.environ:
-                os.environ[key] = value
+# ---------------------------------------------------------------------------
+# Access gate
+# ---------------------------------------------------------------------------
+# The tool issues real tickets against a real agency's name, so anything that
+# can reach it over the network can print an e-ticket. One shared passcode in
+# front of every page is the cheapest thing that stops that; it is deliberately
+# unhinted, so the login screen gives a stranger nothing to work from.
+APP_PASSWORD = os.environ.get("APP_PASSWORD", "").strip()
+if not APP_PASSWORD:
+    raise RuntimeError(
+        "APP_PASSWORD is not set. Put it in a local .env file (see .env.example) "
+        "or in the host's environment - it must never be committed."
+    )
+
+# Endpoints reachable before signing in: the login form itself, static assets
+# and the health probe (deploy platforms poll it without a cookie).
+PUBLIC_ENDPOINTS = {"login", "static", "health"}
 
 
-load_local_env()
+@app.before_request
+def require_passcode():
+    if request.endpoint in PUBLIC_ENDPOINTS:
+        return None
+    if session.get("authed"):
+        return None
+    if request.path.startswith("/api/"):
+        return jsonify({"success": False, "error": "Not authorised."}), 401
+    return redirect(url_for("login", next=request.full_path if request.query_string else request.path))
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    error = ""
+    if request.method == "POST":
+        supplied = (request.form.get("password") or "").strip()
+        # Constant-time so the response cannot be timed character by character.
+        if hmac.compare_digest(supplied.encode("utf-8"), APP_PASSWORD.encode("utf-8")):
+            session["authed"] = True
+            session.permanent = False
+            target = request.form.get("next") or url_for("index")
+            # Only ever bounce back inside this app - an absolute URL here
+            # would turn the login form into an open redirect.
+            if not target.startswith("/") or target.startswith("//"):
+                target = url_for("index")
+            return redirect(target)
+        error = "Incorrect passcode."
+    return render_template("login.html", error=error, next=request.args.get("next", ""))
+
+
+@app.route("/logout", methods=["GET", "POST"])
+def logout():
+    session.clear()
+    return redirect(url_for("login"))
+
+
 
 # ─── Registered Agencies ────────────────────────────────────────────
 AGENCIES = {

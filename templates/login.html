@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sign in</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230e9488'/%3E%3C/svg%3E">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+        :root{--primary:#0f2742;--primary-dark:#081727;--accent:#0e9488;--surface:#fff;--bg:#eef2f6;--text:#162033;--text-muted:#667085;--border:#d9e0ea;--danger:#c24135}
+        body{font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;
+            background:linear-gradient(180deg,#f7f9fc 0%,var(--bg) 100%);color:var(--text);
+            min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px}
+        body::before{content:'';position:fixed;inset:0;background:linear-gradient(90deg,rgba(15,39,66,.05) 1px,transparent 1px),linear-gradient(180deg,rgba(15,39,66,.04) 1px,transparent 1px);background-size:44px 44px;mask-image:linear-gradient(180deg,rgba(0,0,0,.65),transparent 70%);pointer-events:none}
+        .box{position:relative;width:100%;max-width:340px;background:rgba(255,255,255,.97);
+            border:1px solid rgba(217,224,234,.9);border-radius:12px;
+            box-shadow:0 24px 70px rgba(15,39,66,.12);padding:32px 28px}
+        .mark{width:40px;height:40px;border-radius:11px;background:var(--accent);
+            display:flex;align-items:center;justify-content:center;margin:0 auto 18px;
+            box-shadow:0 12px 30px rgba(14,148,136,.3)}
+        .mark svg{width:19px;height:19px;fill:none;stroke:#fff;stroke-width:2;stroke-linecap:round}
+        h1{font-size:1rem;font-weight:750;color:var(--primary);text-align:center;letter-spacing:.2px}
+        /* No hint here by design - the screen says nothing about what it wants. */
+        label{display:block;font-size:.7rem;font-weight:800;letter-spacing:1.4px;
+            text-transform:uppercase;color:var(--primary);margin:24px 0 7px}
+        input{width:100%;padding:12px 13px;border:1px solid var(--border);border-radius:8px;
+            font-size:1.05rem;font-family:inherit;letter-spacing:.35em;text-align:center;
+            color:var(--text);background:#fff;transition:all .2s;outline:none}
+        input:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(14,148,136,.12)}
+        button{width:100%;margin-top:16px;padding:12px;border:none;border-radius:8px;
+            background:var(--primary-dark);color:#fff;font-family:inherit;font-size:.82rem;
+            font-weight:700;letter-spacing:.4px;cursor:pointer;transition:background .2s}
+        button:hover{background:var(--primary)}
+        .error{margin-top:14px;font-size:.74rem;font-weight:600;color:var(--danger);text-align:center}
+    </style>
+</head>
+<body>
+    <main class="box">
+        <div class="mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><rect x="4" y="10.5" width="16" height="10" rx="2"/><path d="M8 10.5V7a4 4 0 0 1 8 0v3.5"/></svg>
+        </div>
+        <h1>Enter passcode</h1>
+        <form method="POST" autocomplete="off">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="next" value="{{ next }}">
+            <label for="password">Passcode</label>
+            <input id="password" name="password" type="password" inputmode="numeric"
+                   autocomplete="off" autofocus required>
+            <button type="submit">Unlock</button>
+        </form>
+        {% if error %}<p class="error">{{ error }}</p>{% endif %}
+    </main>
+</body>
+</html>

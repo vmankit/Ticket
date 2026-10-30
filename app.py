@@ -215,15 +215,37 @@ if not APP_PASSWORD:
 # and the health probe (deploy platforms poll it without a cookie).
 PUBLIC_ENDPOINTS = {"login", "static", "health"}
 
+# Idle timeout. An agent leaves the tool open between bookings, so this counts
+# quiet time rather than time since signing in - every request pushes it back.
+SESSION_IDLE_MINUTES = int(os.environ.get("SESSION_IDLE_MINUTES", "120"))
+
+app.permanent_session_lifetime = timedelta(minutes=SESSION_IDLE_MINUTES)
+# The cookie is what proves a visitor passed the gate, so it should not travel
+# in clear text or ride along with requests started by other sites.
+app.config["SESSION_COOKIE_HTTPONLY"] = True
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+app.config["SESSION_COOKIE_SECURE"] = IS_PRODUCTION
+
 
 @app.before_request
 def require_passcode():
     if request.endpoint in PUBLIC_ENDPOINTS:
         return None
+
     if session.get("authed"):
-        return None
+        # The cookie's own expiry is set by the browser and can be edited, so
+        # the deadline is also carried inside the signed session and checked
+        # here - that copy cannot be altered without the secret key.
+        seen_at = session.get("seen_at", 0)
+        idle = datetime.now().timestamp() - seen_at
+        if seen_at and idle > SESSION_IDLE_MINUTES * 60:
+            session.clear()
+        else:
+            session["seen_at"] = datetime.now().timestamp()
+            return None
+
     if request.path.startswith("/api/"):
-        return jsonify({"success": False, "error": "Not authorised."}), 401
+        return jsonify({"success": False, "error": "Session expired."}), 401
     return redirect(url_for("login", next=request.full_path if request.query_string else request.path))
 
 
@@ -235,7 +257,10 @@ def login():
         # Constant-time so the response cannot be timed character by character.
         if hmac.compare_digest(supplied.encode("utf-8"), APP_PASSWORD.encode("utf-8")):
             session["authed"] = True
-            session.permanent = False
+            session["seen_at"] = datetime.now().timestamp()
+            # Permanent only in the sense that Flask then applies
+            # permanent_session_lifetime to the cookie; it still expires.
+            session.permanent = True
             target = request.form.get("next") or url_for("index")
             # Only ever bounce back inside this app - an absolute URL here
             # would turn the login form into an open redirect.

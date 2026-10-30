@@ -24,6 +24,13 @@
         .header p{color:rgba(255,255,255,.72);font-size:.85rem;margin-top:1px;letter-spacing:.2px;position:relative;z-index:1}
         .header .db-badge{display:inline-flex;align-items:center;background:rgba(255,255,255,.08);color:rgba(255,255,255,.86);padding:7px 12px;border-radius:999px;font-size:.72rem;font-weight:600;border:1px solid rgba(255,255,255,.12);position:relative;z-index:1;white-space:nowrap}
 
+        .header-aside{display:flex;align-items:center;gap:10px;position:relative;z-index:1}
+        .logout-link{display:inline-flex;align-items:center;padding:7px 13px;border-radius:999px;
+            background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.12);
+            color:rgba(255,255,255,.86);font-size:.72rem;font-weight:600;text-decoration:none;
+            white-space:nowrap;transition:background .2s,color .2s}
+        .logout-link:hover{background:rgba(255,255,255,.16);color:#fff}
+
         .container{max-width:1080px;margin:28px auto 40px;padding:0 24px 96px;position:relative;z-index:1}
         .card{background:rgba(255,255,255,.96);border-radius:10px;box-shadow:var(--shadow);overflow:hidden;border:1px solid rgba(217,224,234,.9);margin-bottom:18px;backdrop-filter:blur(12px)}
         .card-header{background:#fff;padding:17px 22px;display:flex;align-items:center;gap:12px;border-bottom:1px solid var(--border)}
@@ -257,7 +264,10 @@
                     <p>Professional E-Ticket Generator</p>
                 </div>
             </div>
-            <div class="db-badge">8,800+ Airports / 100+ Airlines / Multi-Segment</div>
+            <div class="header-aside">
+                <div class="db-badge">8,800+ Airports / 100+ Airlines / Multi-Segment</div>
+                <a class="logout-link" href="/logout" title="Sign out of this device">Logout</a>
+            </div>
         </div>
     </div>
 

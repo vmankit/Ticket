@@ -108,17 +108,16 @@ def validate_booking(form):
     if not (form.get("booking_platform") or "").strip():
         errors.append("Booking Platform is required.")
 
+    # Neither appears anywhere on the printed ticket, and agents routinely issue
+    # one without the traveller's contact details to hand, so both are optional
+    # and only checked when something was actually entered.
     email = (form.get("customer_email") or "").strip()
-    if not email:
-        errors.append("Customer Email is required.")
-    elif not EMAIL_RE.match(email):
+    if email and not EMAIL_RE.match(email):
         errors.append(f"Customer Email \"{email}\" is not a valid email address.")
 
     phone = (form.get("customer_phone") or "").strip()
     digits = re.sub(r"\D", "", phone)
-    if not phone:
-        errors.append("Customer Phone is required.")
-    elif not 7 <= len(digits) <= 15:
+    if phone and not 7 <= len(digits) <= 15:
         # Airline tickets often mask mobile numbers for privacy (e.g. +91-87******48)
         if re.search(r"\*+", phone) and len(re.sub(r"[^\d*]", "", phone)) >= 7:
             pass

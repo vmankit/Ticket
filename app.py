@@ -5,6 +5,7 @@ from reportlab.platypus import Table, TableStyle, Paragraph, Spacer, Image
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.pdfgen import canvas
 from reportlab.graphics.barcode.code128 import Code128
+import ast
 import base64
 import io
 import json
@@ -31,12 +32,66 @@ except ImportError:
 
 # ─── Import comprehensive airport DB from CSV extraction ────────────
 from airports_data import AIRPORTS_DB
+
+# airports_data.py is generated from airport-codes.csv, whose "municipality" is
+# the town an airport administratively sits in - not the name airlines print on
+# a ticket. IXB came out as "Siliguri" when every carrier calls it Bagdogra.
+# Corrections live here rather than in the generated file so regenerating it
+# does not silently undo them.
+# Printed at the foot of every ticket. Portal-specific lines from the source
+# e-tickets are deliberately absent: "log on to the MyTrip section" names an
+# agency portal that is not this one, and the partial-cancellation rule applies
+# to a fare product this agency does not sell.
+ADDITIONAL_INFORMATION = [
+    "Use your airline PNR for all communication with the airline about this booking.",
+    "Carry a printed copy of this e-ticket, or show it on your phone, at check-in and airport entry.",
+    "Check-in opens 3 hours before departure and closes 60 minutes prior. Report at least 2 hours early.",
+    "Web check-in is mandatory on the airline's website and closes 60 minutes before departure.",
+    "Carry a valid government-issued photo ID. For infants, a date-of-birth certificate is mandatory.",
+    "For international flights, a passport and the relevant visa and travel documents are mandatory.",
+    "Reconfirm your departure time at least 24 hours before travel.",
+    "Reconfirm the airport terminal before travel; it can change after booking.",
+    "All times shown are local (24-hr format) at the relevant airport.",
+    "Check your baggage allowance and the airline's requirements before heading to the airport.",
+    "Power banks and portable chargers are allowed only in hand baggage, never in checked-in baggage.",
+    "Checked-in baggage containing a power bank will not be loaded, for security reasons.",
+    "On flights from Srinagar and Jammu, hand baggage is not permitted for security reasons.",
+    "No meal is served on flights under 2 hours.",
+    "Cancellation and reissue are subject to airline policies, which can change at any time.",
+    "We are not responsible for airline delays, cancellations or missed connecting flights.",
+]
+
+AIRPORT_CITY_OVERRIDES = {
+    "IXB": "Bagdogra",      # municipality Siliguri
+    "GOI": "Goa",           # municipality Vasco da Gama
+    "GOX": "Goa",           # municipality Mopa
+    "DMM": "Dammam",        # municipality Ad Dammam
+    "MCT": "Muscat",        # municipality Muscat/Seeb
+    "IXD": "Prayagraj",     # Allahabad renamed
+    "IXG": "Belagavi",      # Belgaum renamed
+    "SLV": "Shimla",        # municipality Jubbarhatti
+    "KJB": "Kurnool",       # municipality Orvakal
+    "RJA": "Rajahmundry",   # municipality Madhurapudi
+    "SAG": "Shirdi",        # municipality Kakadi
+    "SDW": "Sindhudurg",    # municipality Chipi
+    "TCR": "Tuticorin",     # municipality Vagaikulam
+    "DXN": "Noida",         # municipality Gautam Buddha Nagar
+}
+
+for _code, _entry in AIRPORTS_DB.items():
+    _city = AIRPORT_CITY_OVERRIDES.get(_code)
+    if _city:
+        _entry["city"] = _city
+    elif "(" in (_entry.get("city") or ""):
+        # "Dehradun (Jauligrant)" - the bracketed locality is noise on a ticket.
+        _entry["city"] = _entry["city"].split("(")[0].strip()
 from booking_store import backend as booking_backend, get_next_booking_id, save_booking
 from utils import generate_qr
 from ticket_pdf import (
     ITINERARY_BASE_MM,
     PAX_LABEL_BASE_MM,
     TicketCanvas,
+    draw_additional_info,
     draw_fares,
     draw_flight,
     draw_footer,
@@ -407,13 +462,6 @@ def compute_duration(dep_raw, arr_raw, from_code="", to_code="", travel_date="")
     minutes = int((arr - dep).total_seconds() // 60) % (24 * 60)
     return f"{minutes // 60}h {minutes % 60}m"
 
-
-def to_12_hour(raw):
-    """"14:05" -> "2:05 PM". Returns "" for anything unparseable."""
-    try:
-        return datetime.strptime((raw or "").strip(), "%H:%M").strftime("%-I:%M %p")
-    except ValueError:
-        return ""
 
 
 def find_first_date(value):
@@ -1453,6 +1501,44 @@ def ai_prompt():
     return jsonify({"prompt": prompt})
 
 
+def _loads_llm_json(json_str):
+    """Parse JSON an LLM produced, repairing what they habitually get wrong.
+
+    Returns (data, error). Chat models emit trailing commas and Python-style
+    single quotes, and copying out of a chat window turns straight quotes into
+    curly ones - all of which json.loads rejects outright, which is what the
+    paste box kept erroring on.
+    """
+    attempts = [json_str]
+
+    # Invalid backslash escapes (\@, \., \_ ...).
+    attempts.append(re.sub(r'\\([^"\\/bfnrtu])', r'\1', json_str))
+
+    # Curly quotes from a chat window, plus trailing commas before } or ].
+    straight = (json_str
+                .replace("“", '"').replace("”", '"')
+                .replace("‘", "'").replace("’", "'"))
+    attempts.append(re.sub(r",(\s*[}\]])", r"\1", straight))
+
+    last_error = None
+    for candidate in attempts:
+        try:
+            return json.loads(candidate), None
+        except json.JSONDecodeError as exc:
+            last_error = exc
+
+    # Single-quoted keys, or Python's True/False/None. literal_eval understands
+    # those natively and, unlike swapping quotes by regex, cannot execute code.
+    try:
+        value = ast.literal_eval(straight)
+        if isinstance(value, dict):
+            return value, None
+    except (ValueError, SyntaxError, TypeError, MemoryError, RecursionError):
+        pass
+
+    return None, last_error
+
+
 @app.route("/api/parse-ai-data", methods=["POST"])
 def parse_ai_data():
     """Accept AI-extracted JSON and normalize it for the form auto-fill.
@@ -1481,17 +1567,11 @@ def parse_ai_data():
         }), 400
 
     json_str = json_match.group(0)
-    try:
-        data = json.loads(json_str)
-    except json.JSONDecodeError:
-        # Repair invalid backslash escapes (e.g. \@, \., \_, etc. emitted by LLMs)
-        repaired = re.sub(r'\\([^"\\/bfnrtu])', r'\1', json_str)
-        try:
-            data = json.loads(repaired)
-        except json.JSONDecodeError as exc:
-            return jsonify({
-                "error": f"Invalid JSON: {exc}. Make sure the AI output is complete and properly formatted."
-            }), 400
+    data, parse_error = _loads_llm_json(json_str)
+    if data is None:
+        return jsonify({
+            "error": f"Invalid JSON: {parse_error}. Make sure the AI output is complete and properly formatted."
+        }), 400
 
     if not isinstance(data, dict):
         return jsonify({"error": "Expected a JSON object, not an array or primitive."}), 400
@@ -2054,11 +2134,6 @@ def generate_ticket():
         travel_date = request.form.get(f"{prefix}date", "")
         dep_time_raw = request.form.get(f"{prefix}dep_time_raw", "")
         arr_time_raw = request.form.get(f"{prefix}arr_time_raw", "")
-        # The 12-hour fields are filled by JavaScript on submit. Derive them
-        # from the raw 24-hour values when they are missing, otherwise a
-        # client without JS produces a ticket with no flight times on it.
-        dep_time = request.form.get(f"{prefix}dep_time", "") or to_12_hour(dep_time_raw)
-        arr_time = request.form.get(f"{prefix}arr_time", "") or to_12_hour(arr_time_raw)
         # Always computed here rather than taking the submitted value: the
         # browser only subtracts clock times and has no timezone data, so it
         # would override the correct figure on international routes.
@@ -2126,7 +2201,6 @@ def generate_ticket():
             "from_code": from_code, "from_city": from_city, "from_full": from_full,
             "to_code": to_code, "to_city": to_city, "to_full": to_full,
             "date": date_display, "date_raw": travel_date,
-            "dep_time": dep_time, "arr_time": arr_time,
             "dep_time_raw": dep_time_raw, "arr_time_raw": arr_time_raw,
             "duration": duration, "class": travel_class,
             "seat": seat,
@@ -2245,9 +2319,6 @@ def generate_ticket():
             "name": pax_raw_name,
             "title": pax_title if pax_title in PASSENGER_TITLES else "",
             "pax_type": pax_type if pax_type in PASSENGER_TYPES else "Adult",
-            "passport": request.form.get(f"{prefix}passport", ""),
-            "dob": request.form.get(f"{prefix}dob", ""),
-            "doe": request.form.get(f"{prefix}doe", ""),
             "pnr": pnr,
             "seat": single_seat,
             "meal": single_meal,
@@ -2259,22 +2330,12 @@ def generate_ticket():
             "hand_per_segment": hand_per_segment,
         })
 
-    # ── Fare details ─────────────────────────────────────────
-    # Each field is parsed independently: a single malformed entry must not
-    # silently zero the whole breakdown and issue an INR 0.00 ticket.
+    # ── Fare ─────────────────────────────────────────────────
+    # The ticket prints one figure, the amount paid, so that is the one figure
+    # the agent enters: the net price they want the traveller to see. A split
+    # into base fare and taxes was only ever summed back up before printing.
     fare_errors = []
-    base_fare = parse_money(request.form.get("base_fare"), "Base Fare", fare_errors, required=True)
-    taxes = parse_money(request.form.get("taxes_fees"), "Airline Taxes & Fees", fare_errors, required=True)
-    insurance = parse_money(request.form.get("insurance"), "Insurance", fare_errors)
-    meals_fee = parse_money(request.form.get("meals_fee"), "Meals", fare_errors)
-    baggage_fee = parse_money(request.form.get("baggage_fee"), "Baggage", fare_errors)
-    seats_fee = parse_money(request.form.get("seats_fee"), "Seats", fare_errors)
-    zero_cancel = parse_money(request.form.get("zero_cancel"), "Zero Cancel", fare_errors)
-    discount = parse_money(request.form.get("discount"), "Discount", fare_errors)
-
-    total_fare = base_fare + taxes + insurance + meals_fee + baggage_fee + seats_fee + zero_cancel - discount
-    if not fare_errors and total_fare < 0:
-        fare_errors.append("Discount cannot exceed the total of all other fare components.")
+    total_fare = parse_money(request.form.get("net_price"), "Net Price", fare_errors, required=True)
 
     errors = (
         validate_booking(request.form)
@@ -2285,8 +2346,6 @@ def generate_ticket():
     if errors:
         cleanup_temp_files(flights)
         return render_validation_errors(errors)
-    base_fare_str = format_money(base_fare)
-    taxes_fees_str = format_money(taxes)
     total_fare_str = format_money(total_fare)
 
     # Route summary
@@ -2316,6 +2375,8 @@ def generate_ticket():
     draw_fares(t, total_fare_str, remarks=remarks,
                gst_company=gst_company, gstin=gstin, show_amount=not hide_fare)
 
+    draw_additional_info(t, ADDITIONAL_INFORMATION)
+
     contact_parts = []
     if agency_email:
         contact_parts.append(agency_email)
@@ -2329,10 +2390,8 @@ def generate_ticket():
                f"  ·  {fare_type}  ·  {refund_status}",
         contact_line=contact_line,
         terms="Show your barcode at the airport entry gate — it covers every flight on this "
-              "ticket. Carry a valid government-issued photo ID. Check your baggage allowance "
-              "and airline-specific requirements before heading to the airport. The PNR and "
-              "ticket number above are your proof of purchase — keep this document handy until "
-              "after travel.",
+              "ticket. The PNR and ticket number above are your proof of purchase; keep this "
+              "document handy until after travel.",
     )
 
     t.save()
@@ -2346,7 +2405,7 @@ def generate_ticket():
     ) if part)
     flight_nos = ", ".join(f["flight_no"] for f in flights)
     travel_date_val = flights[0]["date"] if flights else ""
-    dep_time_val = flights[0]["dep_time"] if flights else ""
+    dep_time_val = flights[0]["dep_time_raw"] if flights else ""
     
     excel_data = [
         datetime.now().strftime("%Y-%m-%d %H:%M:%S"),

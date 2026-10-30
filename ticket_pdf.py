@@ -89,6 +89,9 @@ AMOUNT_GAP_MM = 7.0         # table foot to the amount baseline
 DIVIDER_GAP_MM = 5.9        # amount baseline to the divider
 ISSUED_GAP_MM = 5.7         # divider to the first footer line
 TERMS_LEADING_MM = 4.4
+INFO_LEADING_MM = 3.3       # within one Additional Information item
+INFO_ITEM_GAP_MM = 1.5      # between items
+INFO_GUTTER_MM = 7.0        # between the two columns
 COMPANY_GAP_MM = 7.2
 FOOTER_LINE_MM = 4.3
 
@@ -618,9 +621,11 @@ def draw_flight(t, flight, index, total):
            size=11, color=MUTED)
     t.text(right_x, below(CITY_BASE_MM), flight.get("to_city") or flight.get("to_code", ""),
            size=11, color=MUTED, align="right")
-    t.text(left_x, below(TIME_BASE_MM), flight.get("dep_time") or flight.get("dep_time_raw") or "\u2014",
+    # 24-hour, as the footer states. Airlines publish schedules this way and
+    # it cannot be misread the way "5:35" without a suffix can.
+    t.text(left_x, below(TIME_BASE_MM), flight.get("dep_time_raw") or "\u2014",
            size=18, font=FONT_BOLD, color=INK)
-    t.text(right_x, below(TIME_BASE_MM), flight.get("arr_time") or flight.get("arr_time_raw") or "\u2014",
+    t.text(right_x, below(TIME_BASE_MM), flight.get("arr_time_raw") or "\u2014",
            size=18, font=FONT_BOLD, color=INK, align="right")
     t.text(left_x, below(DATE_BASE_MM), flight.get("date", ""), size=9, color=FAINT)
     t.text(right_x, below(DATE_BASE_MM), flight.get("date", ""), size=9, color=FAINT, align="right")
@@ -839,6 +844,54 @@ def draw_passengers(t, passengers, flights):
             t.y = PAGE_H - MARGIN
         else:
             t.y = bottom
+
+
+def draw_additional_info(t, items):
+    """The traveller-facing notes, set in two columns.
+
+    Measured as one block before anything is drawn: these notes are the last
+    thing on the ticket, and a list that breaks halfway down a column reads as
+    though the ticket were truncated.
+    """
+    items = [item for item in (items or []) if item and item.strip()]
+    if not items:
+        return
+
+    col_w = (CONTENT_W - INFO_GUTTER_MM * MM) / 2
+    half = (len(items) + 1) // 2
+    columns = (items[:half], items[half:])
+    style = ParagraphStyle(
+        "info", fontName=FONT, fontSize=7.2,
+        leading=INFO_LEADING_MM * MM, textColor=MUTED,
+        leftIndent=2.9 * MM, bulletIndent=0, bulletFontSize=7.2)
+
+    def measure(column):
+        height = 0
+        for text in column:
+            _, item_h = Paragraph(escape(text), style, bulletText="•").wrap(col_w, 400)
+            height += item_h + INFO_ITEM_GAP_MM * MM
+        return height
+
+    block_h = max(measure(column) for column in columns)
+    label_h = SECTION_GAP_MM * MM + 16
+
+    if t.y - (label_h + block_h) < MARGIN:
+        t.c.showPage()
+        t.y = PAGE_H - MARGIN
+    t.y -= 16
+    t.tracked(MARGIN, t.y, "Additional Information", size=9, tracking=2.6)
+    t.y -= SECTION_GAP_MM * MM
+
+    top = t.y
+    for index, column in enumerate(columns):
+        x = MARGIN + index * (col_w + INFO_GUTTER_MM * MM)
+        y = top
+        for text in column:
+            para = Paragraph(escape(text), style, bulletText="•")
+            _, item_h = para.wrap(col_w, 400)
+            para.drawOn(t.c, x, y - item_h)
+            y -= item_h + INFO_ITEM_GAP_MM * MM
+    t.y = top - block_h
 
 
 def draw_fares(t, total_str, *, remarks, gst_company, gstin, show_amount=True):

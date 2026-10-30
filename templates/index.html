@@ -496,19 +496,6 @@ Example:
                     <h2>Passenger Details</h2>
                 </div>
                 <div class="card-body">
-                    <div class="section-title"><span class="dot"></span>CUSTOMER CONTACT (BOOKING)</div>
-                    <div class="form-grid" style="margin-bottom: 24px;">
-                        <div class="form-group">
-                            <label>Customer Phone <span class="req">*</span></label>
-                            <input type="text" name="customer_phone" placeholder="e.g. +91 9876543210" required>
-                        </div>
-                        <div class="form-group">
-                            <label>Customer Email <span class="req">*</span></label>
-                            <input type="email" name="customer_email" placeholder="e.g. user@example.com" required>
-                        </div>
-                    </div>
-                    <div class="separator"></div>
-
                     <input type="hidden" name="pax_count" id="paxCount" value="1">
                     <div id="paxContainer"></div>
 
@@ -525,54 +512,14 @@ Example:
                     <h2>Fare Details</h2>
                 </div>
                 <div class="card-body">
-                    <div class="section-title"><span class="dot"></span>FARE BREAKDOWN</div>
-                    <div class="fare-grid" style="grid-template-columns: 1fr 1fr; margin-bottom: 16px;">
+                    <div class="section-title"><span class="dot"></span>NET PRICE</div>
+                    <div class="fare-grid" style="grid-template-columns: 1fr; margin-bottom: 4px;">
                         <div class="form-group">
-                            <label>Base Fare (INR) <span class="req">*</span></label>
-                            <input type="number" step="0.01" min="0" name="base_fare" id="baseFare" placeholder="e.g. 3500" required oninput="calcTotal()">
-                        </div>
-                        <div class="form-group">
-                            <label>Airline Taxes & Fees (INR) <span class="req">*</span></label>
-                            <input type="number" step="0.01" min="0" name="taxes_fees" id="taxesFees" placeholder="e.g. 850" required oninput="calcTotal()">
-                        </div>
-                        <div class="form-group">
-                            <label>Discount (INR)</label>
-                            <input type="number" step="0.01" min="0" name="discount" id="discount" value="0" oninput="calcTotal()">
-                            <div class="helper" id="discountHelper"></div>
-                        </div>
-                        <div class="form-group">
-                            <label>Total Amount (INR) <span class="auto-tag">Auto</span></label>
-                            <input type="text" name="total_fare" id="totalFare" class="auto-field" placeholder="Auto-calculated" readonly style="font-weight:700;font-size:1rem">
+                            <label>Net Price (INR) <span class="req">*</span></label>
+                            <input type="number" step="0.01" min="0" name="net_price" id="netPrice" placeholder="e.g. 17045" required oninput="calcTotal()">
+                            <div class="helper">Ticket par yahi amount chhapega.</div>
                         </div>
                     </div>
-
-                    <!-- Almost always zero, so kept out of the way. -->
-                    <button type="button" class="link-toggle" onclick="toggleAncillaries()">
-                        <span id="ancillariesLabel">Add extra charges (insurance, meals, baggage, seats)</span>
-                    </button>
-                    <div class="form-grid three-col" id="ancillaries" hidden>
-                        <div class="form-group">
-                            <label>Insurance (INR)</label>
-                            <input type="number" step="0.01" min="0" name="insurance" id="insurance" value="0" oninput="calcTotal()">
-                        </div>
-                        <div class="form-group">
-                            <label>Meals (INR)</label>
-                            <input type="number" step="0.01" min="0" name="meals_fee" id="mealsFee" value="0" oninput="calcTotal()">
-                        </div>
-                        <div class="form-group">
-                            <label>Baggage (INR)</label>
-                            <input type="number" step="0.01" min="0" name="baggage_fee" id="baggageFee" value="0" oninput="calcTotal()">
-                        </div>
-                        <div class="form-group">
-                            <label>Seats (INR)</label>
-                            <input type="number" step="0.01" min="0" name="seats_fee" id="seatsFee" value="0" oninput="calcTotal()">
-                        </div>
-                        <div class="form-group">
-                            <label>Zero Cancel (INR)</label>
-                            <input type="number" step="0.01" min="0" name="zero_cancel" id="zeroCancel" value="0" oninput="calcTotal()">
-                        </div>
-                    </div>
-                    
                 </div>
             </div>
             </div>
@@ -612,25 +559,12 @@ function showToast(msg,dur=3000){const t=document.getElementById('toast');t.text
 
 // ─── Fare calculation ─────────────────────────────────────
 function calcTotal(){
-    const val=id=>parseFloat(document.getElementById(id).value)||0;
-    const base=val('baseFare'), tax=val('taxesFees'), disc=val('discount');
-    const extras=val('insurance')+val('mealsFee')+val('baggageFee')+val('seatsFee')+val('zeroCancel');
-    const total=base+tax+extras-disc;
-
-    document.getElementById('totalFare').value=total.toFixed(2);
+    const total=parseFloat(document.getElementById('netPrice').value)||0;
     document.getElementById('fareTotalDisplay').textContent=
         'INR '+total.toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2});
-
-    // Mirror the server rule so the problem is visible before submitting.
-    const helper=document.getElementById('discountHelper');
-    const tooLarge=total<0;
-    helper.textContent=tooLarge?'Discount exceeds the rest of the fare.':'';
-    helper.style.color=tooLarge?'var(--danger)':'';
-    document.getElementById('fareTotalDisplay').classList.toggle('over', tooLarge);
 }
 
 // ─── Time helpers ─────────────────────────────────────────
-function formatTime12(t){if(!t)return'';const[h,m]=t.split(':').map(Number);return(h%12||12)+':'+String(m).padStart(2,'0')+(h>=12?' PM':' AM')}
 function calcDur(depId,arrId,durId){
     const d=document.getElementById(depId).value,a=document.getElementById(arrId).value;
     if(!d||!a)return;
@@ -654,14 +588,6 @@ function calcDur(depId,arrId,durId){
     if(ta<td)ta+=1440;
     const diff=ta-td;
     label.textContent='Duration: '+Math.floor(diff/60)+'h '+diff%60+'m'+(ta>=1440?' (next day)':'');
-}
-
-function toggleAncillaries(){
-    const box=document.getElementById('ancillaries');
-    box.hidden=!box.hidden;
-    document.getElementById('ancillariesLabel').textContent=box.hidden
-        ? 'Add extra charges (insurance, meals, baggage, seats)'
-        : 'Hide extra charges';
 }
 
 function toggleExtras(i){
@@ -862,8 +788,6 @@ function addFlight(){
         </div>
 
         <!-- Hidden fields for formatted times and segment barcode -->
-        <input type="hidden" name="flight_${i}_dep_time" id="fdep_fmt_${i}">
-        <input type="hidden" name="flight_${i}_arr_time" id="farr_fmt_${i}">
         <input type="hidden" name="flight_${i}_barcode_token" id="bc_token_${i}">
         <input type="hidden" name="flight_${i}_barcode_data" id="bc_data_${i}">
     `;
@@ -1000,22 +924,6 @@ function addPassenger(){
             </div>
         </div>
 
-        <div class="section-title" style="margin-top:12px; margin-bottom:8px;"><span class="dot"></span>INTERNATIONAL / TRAVEL DOCS</div>
-        <div class="form-grid three-col">
-            <div class="form-group">
-                <label>Passport Number</label>
-                <input type="text" name="pax_${i}_passport" placeholder="e.g. V2288007">
-            </div>
-            <div class="form-group">
-                <label>Date of Birth (DOB)</label>
-                <input type="text" name="pax_${i}_dob" placeholder="e.g. 01 Jan 2000">
-            </div>
-            <div class="form-group">
-                <label>Date of Expiry (DOE)</label>
-                <input type="text" name="pax_${i}_doe" placeholder="e.g. 17 Aug 2031">
-            </div>
-        </div>
-
         <div class="section-title" style="margin-top:12px; margin-bottom:8px;"><span class="dot"></span>SEAT, MEAL & BAGGAGE</div>
         <div class="form-grid four-col">
             <div class="form-group" style="grid-column:1/-1">
@@ -1142,29 +1050,18 @@ function applyExtractedData(data){
     if(data.booking_id)document.getElementById('bookingIdInput').value=data.booking_id;
     if(data.pnr)setInputValue('pnr',data.pnr);
     if(data.booking_date)document.getElementById('booking_date').value=data.booking_date;
-    setInputValue('customer_email', data.customer_email || 'traveler@example.com');
-    setInputValue('customer_phone', data.customer_phone || '+91 9876543210');
-
+    // Pre-fill the net price with what the source ticket was sold for; the
+    // agent overwrites it with the figure they want the traveller to see.
     const base=parseFloat(data.base_fare||'');
     const taxes=parseFloat(data.taxes_fees||'');
     const total=parseFloat(data.total_fare||'');
-    const disc=parseFloat(data.discount||'');
     const hideFareCb=document.getElementById('hide_fare');
 
-    if(!isNaN(total) && total > 0 && (isNaN(base) || base === 0)){
-        document.getElementById('baseFare').value=total;
-        document.getElementById('taxesFees').value=(!isNaN(taxes) && taxes > 0) ? taxes : 0;
-        if(hideFareCb) hideFareCb.checked=false;
-    } else if(!isNaN(base) && base > 0){
-        document.getElementById('baseFare').value=base;
-        document.getElementById('taxesFees').value=(!isNaN(taxes)) ? taxes : 0;
-        if(hideFareCb) hideFareCb.checked=false;
-    } else {
-        document.getElementById('baseFare').value=0;
-        document.getElementById('taxesFees').value=0;
-        if(hideFareCb) hideFareCb.checked=true;
-    }
-    if(!isNaN(disc))document.getElementById('discount').value=disc;
+    let net=0;
+    if(!isNaN(total) && total>0) net=total;
+    else if(!isNaN(base) && base>0) net=base+((!isNaN(taxes)&&taxes>0)?taxes:0);
+    document.getElementById('netPrice').value=net||'';
+    if(hideFareCb) hideFareCb.checked=!net;
     calcTotal();
 
     const flights=Array.isArray(data.flights)?data.flights:[];
@@ -1254,10 +1151,6 @@ function applyExtractedData(data){
     resetPassengers(pax.length||1);
     pax.forEach((p,i)=>{
         if(p.name)document.querySelector(`[name="pax_${i}_name"]`).value=p.name;
-        if(p.dob)document.querySelector(`[name="pax_${i}_dob"]`).value=p.dob;
-        if(p.passport)document.querySelector(`[name="pax_${i}_passport"]`).value=p.passport;
-        const doeEl=document.querySelector(`[name="pax_${i}_doe"]`);
-        if(doeEl&&p.doe)doeEl.value=p.doe;
         setSelectValue(document.querySelector(`[name="pax_${i}_title"]`), p.title);
         setSelectValue(document.querySelector(`[name="pax_${i}_type"]`), p.pax_type || p.type || 'Adult');
     });
@@ -1300,10 +1193,6 @@ function getSampleTicketData(){
         booking_id:'MMT2605071001',
         pnr:'MAIN01',
         booking_date:new Date().toISOString().split('T')[0],
-        customer_email:'traveler@example.com',
-        customer_phone:'+91 9876543210',
-        base_fare:'6000',
-        taxes_fees:'1200',
         total_fare:'7200',
         flights:[
             {
@@ -1342,8 +1231,6 @@ function getSampleTicketData(){
         passengers:[
             {
                 name:'JOHN DOE',
-                dob:'1990-01-15',
-                passport:'K1234567',
                 seat:'12A',
                 meal:'Veg Meal',
                 checkin_bag:'15 KG (1 Piece)',
@@ -1518,16 +1405,8 @@ function clearAiData(){
     statusEl.textContent='';
 }
 
-// ─── Form submit — format times ───────────────────────────
+// ─── Form submit ──────────────────────────────────────────
 document.getElementById('ticketForm').addEventListener('submit',function(e){
-    for(let i=0;i<flightIdx;i++){
-        const dep=document.getElementById('fdep_'+i);
-        const arr=document.getElementById('farr_'+i);
-        const depFmt=document.getElementById('fdep_fmt_'+i);
-        const arrFmt=document.getElementById('farr_fmt_'+i);
-        if(dep&&depFmt)depFmt.value=formatTime12(dep.value);
-        if(arr&&arrFmt)arrFmt.value=formatTime12(arr.value);
-    }
     const btn=document.getElementById('submitBtn');
     const originalHTML=btn.innerHTML;
     btn.innerHTML='<span class="spinner"></span> Generating...';

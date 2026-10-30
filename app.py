@@ -2150,6 +2150,13 @@ def generate_ticket():
     gst_company = request.form.get("gst_company", "").strip()
     gstin = request.form.get("gstin", "").strip().upper()
 
+    # How the traveller paid, printed under the amount. UPI is what this
+    # agency takes nearly every time, so it is the default rather than a
+    # field that has to be set on each ticket.
+    payment_method = request.form.get("payment_method", "").strip() or "UPI"
+    if payment_method.upper() == "NONE":
+        payment_method = ""
+
     # The issue stamp defaults to now, but a ticket is sometimes written up
     # after the fact and has to carry the time it was actually issued.
     issued_at = parse_datetime_local(request.form.get("issued_at")) or datetime.now()
@@ -2446,7 +2453,8 @@ def generate_ticket():
     draw_passengers(t, passengers, flights)
 
     draw_fares(t, total_fare_str, remarks=remarks,
-               gst_company=gst_company, gstin=gstin, show_amount=not hide_fare)
+               gst_company=gst_company, gstin=gstin,
+               payment_method=payment_method, show_amount=not hide_fare)
 
     draw_additional_info(t, ADDITIONAL_INFORMATION)
 

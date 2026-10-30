@@ -31,7 +31,6 @@ MARGIN = MARGIN_MM * MM
 CONTENT_W = PAGE_W - 2 * MARGIN
 
 # Header
-LOGO_TOP_MM, LOGO_SIZE_MM = 12.0, 10.5
 BRAND_BASE_MM = 17.0
 SUB_AGENCY_BASE_MM = 21.6
 ADDR_BASE_MM = 25.3               # address, on its own line under the phone
@@ -283,14 +282,6 @@ def draw_header(t, *, company, pnr, booking_id, status, show_agency=True):
       - Right: Status badge aligned to right margin
     """
     right = PAGE_W - MARGIN
-    size = LOGO_SIZE_MM * MM
-
-    # Initials monogram
-    if show_agency:
-        initials = company.get("initials") or "".join(word[0] for word in re.findall(r"[A-Za-z]+", company["name"]))[:2].upper()
-        t.rounded(MARGIN, t.at(LOGO_TOP_MM) - size, size, size, 2.5 * MM, fill=INK, stroke=None)
-        t.text(MARGIN + size / 2, t.at(LOGO_TOP_MM) - size / 2 - 3.5, initials or "JS",
-               size=11, font=FONT_BOLD, color=white, align="center")
 
     # The PNR badge is measured before anything on the left is drawn: a merged
     # itinerary carries one PNR per segment ("ABCD12 / WXYZ34"), and the agency
@@ -304,7 +295,7 @@ def draw_header(t, *, company, pnr, booking_id, status, show_agency=True):
     agency_limit = right - pnr_box_w - 6.0 * MM
 
     wordmark = company["name"].upper() if show_agency else "E-TICKET"
-    brand_x = (MARGIN + size + 3.0 * MM) if show_agency else MARGIN
+    brand_x = MARGIN
     brand_size = 15.0
     room = agency_limit - brand_x
     while brand_size > 11 and t.c.stringWidth(wordmark, FONT_BOLD, brand_size) > room:
@@ -972,7 +963,8 @@ def draw_additional_info(t, items):
     t.y = top - block_h
 
 
-def draw_fares(t, total_str, *, remarks, gst_company, gstin, show_amount=True):
+def draw_fares(t, total_str, *, remarks, gst_company, gstin,
+               payment_method="", show_amount=True):
     """Just the amount paid: the ticket states what was charged, not how it
     was arrived at. The label shares the amount's baseline so the two are
     read back as a single line.
@@ -990,6 +982,9 @@ def draw_fares(t, total_str, *, remarks, gst_company, gstin, show_amount=True):
         label_w = t.c.stringWidth(label.upper(), FONT_BOLD, 7.6) + len(label) * 1.4
         t.tracked(right - value_w - 3.3 * MM - label_w, t.y, label, size=7.6, tracking=1.4)
         t.text(right, t.y, total_str, size=11.5, font=FONT_BOLD, color=INK, align="right")
+        if payment_method:
+            t.y -= 4.2 * MM
+            t.text(right, t.y, f"Paid by {payment_method}", size=8, color=MUTED, align="right")
     else:
         # Nothing on this line, so give the footer back the room it would
         # have taken rather than leaving a gap where a figure used to be.

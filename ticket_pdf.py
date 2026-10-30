@@ -51,17 +51,21 @@ HEAD_H_MM = 12.1
 BADGE_BASE_MM = 6.5
 CODE_BASE_MM = 24.0
 CITY_BASE_MM = 31.0
-AIRPORT_BASE_MM = 34.9            # airport name, under the city
-TIME_BASE_MM = 42.6
-DATE_BASE_MM = 48.0
-PATH_Y_MM = 39.1
-PLANE_Y_MM = 32.7
+TIME_BASE_MM = 39.4
+DATE_BASE_MM = 44.8
+PATH_Y_MM = 35.9
+PLANE_Y_MM = 29.5
 ARC_LIFT_MM = 3.53
-TERMINAL_TOP_MM = 50.8
+# Airport name, under a hairline below the date, as the carrier e-tickets set it.
+AIRPORT_RULE_MM = 48.4
+AIRPORT_BASE_MM = 52.1
+AIRPORT_LEADING_MM = 3.4
+AIRPORT_MAX_LINES = 2
 TERMINAL_H_MM = 5.5
+TERMINAL_GAP_MM = 2.4             # below the airport block
 # Gaps, so a row that is not shown closes up instead of leaving a band of
 # white where the reference happened to put one.
-DATE_BLOCK_END_MM = 50.8          # where the date row stops
+DATE_BLOCK_END_MM = 47.6          # where the date row stops
 BAGGAGE_GAP_MM = 6.6              # above the baggage row
 CARD_TAIL_MM = 5.1                # below the last row, to the card foot
 
@@ -512,6 +516,34 @@ def _find_airline_code(flight):
     return code[:2] if code else ""
 
 
+def _wrap_to_width(canvas, text, width, size, max_lines):
+    """Break `text` onto at most `max_lines`, eliding whatever will not fit."""
+    words = (text or "").split()
+    if not words:
+        return []
+    lines, current = [], words[0]
+    for word in words[1:]:
+        trial = f"{current} {word}"
+        if canvas.stringWidth(trial, FONT, size) <= width:
+            current = trial
+        else:
+            lines.append(current)
+            current = word
+            if len(lines) == max_lines:
+                break
+    else:
+        lines.append(current)
+
+    if len(lines) > max_lines:
+        lines = lines[:max_lines]
+    if len(lines) == max_lines and canvas.stringWidth(" ".join(words), FONT, size) > width * max_lines:
+        last = lines[-1]
+        while last and canvas.stringWidth(last + "…", FONT, size) > width:
+            last = last[:-1].rstrip(" ,-")
+        lines[-1] = last + "…" if last else ""
+    return [line for line in lines if line]
+
+
 def draw_flight(t, flight, index, total):
     """One itinerary card: route, times and the connecting flight path.
 
@@ -521,8 +553,24 @@ def draw_flight(t, flight, index, total):
     has_baggage = bool(_fmt(flight.get("checkin_bag"), "") or _fmt(flight.get("hand_bag"), ""))
     has_terminal = bool((flight.get("from_terminal") or "").strip()
                         or (flight.get("to_terminal") or "").strip())
+
+    # Airport names sit below the flight path, so each one has half the card
+    # to itself and the long official names wrap instead of being shrunk to
+    # nothing. Wrapped first, because the card's height depends on how many
+    # lines the longer of the two needs.
+    airport_w = CONTENT_W / 2 - 5.7 * MM - 5.0 * MM
+    from_lines = _wrap_to_width(t.c, flight.get("from_airport"), airport_w, 8, AIRPORT_MAX_LINES)
+    to_lines = _wrap_to_width(t.c, flight.get("to_airport"), airport_w, 8, AIRPORT_MAX_LINES)
+    airport_lines = max(len(from_lines), len(to_lines))
+
     # The card is only as tall as the rows it actually has.
-    content_end = (TERMINAL_TOP_MM + TERMINAL_H_MM) if has_terminal else DATE_BLOCK_END_MM
+    if airport_lines:
+        content_end = AIRPORT_BASE_MM + (airport_lines - 1) * AIRPORT_LEADING_MM + 1.4
+    else:
+        content_end = DATE_BLOCK_END_MM
+    terminal_top_mm = content_end + TERMINAL_GAP_MM
+    if has_terminal:
+        content_end = terminal_top_mm + TERMINAL_H_MM
     baggage_base_mm = content_end + BAGGAGE_GAP_MM
     if has_baggage:
         content_end = baggage_base_mm
@@ -623,24 +671,6 @@ def draw_flight(t, flight, index, total):
     t.text(right_x, below(CITY_BASE_MM), flight.get("to_city") or flight.get("to_code", ""),
            size=11, color=MUTED, align="right")
 
-    # The airport itself, under the city it serves. A handful of official
-    # names run to 100mm, so they shrink a little and then elide rather than
-    # running into the flight path.
-    name_room = (PAGE_W / 2 - 21.9 * MM) - left_x - 2.0 * MM
-    for name, x, align in ((flight.get("from_airport"), left_x, "left"),
-                           (flight.get("to_airport"), right_x, "right")):
-        name = (name or "").strip()
-        if not name:
-            continue
-        size = 7.5
-        while size > 6.0 and t.c.stringWidth(name, FONT, size) > name_room:
-            size -= 0.25
-        if t.c.stringWidth(name, FONT, size) > name_room:
-            while name and t.c.stringWidth(name + "…", FONT, size) > name_room:
-                name = name[:-1].rstrip(" ,-")
-            name += "…" if name else ""
-        if name:
-            t.text(x, below(AIRPORT_BASE_MM), name, size=size, color=FAINT, align=align)
     # 24-hour, as the footer states. Airlines publish schedules this way and
     # it cannot be misread the way "5:35" without a suffix can.
     t.text(left_x, below(TIME_BASE_MM), flight.get("dep_time_raw") or "\u2014",
@@ -655,7 +685,19 @@ def draw_flight(t, flight, index, total):
                  below(PATH_Y_MM), ARC_LIFT_MM * MM, below(PLANE_Y_MM),
                  flight.get("duration"))
 
-    # Terminal pills sit under each side's date, where the reference puts them.
+    # Airport names, each under a hairline the width of its own half.
+    for lines, x_edge, align in ((from_lines, left_x, "left"),
+                                 (to_lines, right_x, "right")):
+        if not lines:
+            continue
+        rule_x = x_edge if align == "left" else x_edge - airport_w
+        t.rule(rule_x, below(AIRPORT_RULE_MM), airport_w,
+               color=HexColor("#E4E7EC"), line_width=0.75)
+        for n, line in enumerate(lines):
+            t.text(x_edge, below(AIRPORT_BASE_MM + n * AIRPORT_LEADING_MM),
+                   line, size=8, color=MUTED, align=align)
+
+    # Terminal pills sit under the airport block.
     for terminal, x_edge, align in (
         (flight.get("from_terminal"), left_x, "left"),
         (flight.get("to_terminal"), right_x, "right"),
@@ -667,7 +709,7 @@ def draw_flight(t, flight, index, total):
         pad = 3.0 * MM
         width = t.c.stringWidth(label, FONT_BOLD, 8) + 2 * pad
         x = x_edge - width if align == "right" else x_edge
-        t.pill(x, below(TERMINAL_TOP_MM + TERMINAL_H_MM), label, fill=WASH, color=INK,
+        t.pill(x, below(terminal_top_mm + TERMINAL_H_MM), label, fill=WASH, color=INK,
                size=8, pad=pad, height=TERMINAL_H_MM * MM)
 
     if has_baggage:

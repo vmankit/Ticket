@@ -59,6 +59,8 @@ ADDITIONAL_INFORMATION = [
     "No meal is served on flights under 2 hours.",
     "Cancellation and reissue are subject to airline policies, which can change at any time.",
     "We are not responsible for airline delays, cancellations or missed connecting flights.",
+    "Show your barcode at the airport entry gate; it covers every flight on this ticket.",
+    "The PNR and ticket number are your proof of purchase. Keep this document until after travel.",
 ]
 
 AIRPORT_CITY_OVERRIDES = {
@@ -1806,9 +1808,10 @@ TICKET_STATUSES = ("Confirmed", "On Hold", "Waitlisted", "Cancelled", "Refunded"
 # Printed on the ticket and recorded in the tracker, so the list is fixed here
 # rather than trusting whatever the form posts back.
 FARE_TYPES = (
-    "REGULAR", "SAVER", "FLEXI", "NDC FARE", "SME FARE", "CORPORATE FARE",
-    "STUDENT FARE", "SENIOR CITIZEN FARE", "ARMED FORCES FARE",
-    "SPECIAL FARE", "RETAIL FARE", "TOUR FARE",
+    "REGULAR", "PUBLISHED", "SERIES FARE", "LITE", "SAVER", "FLEXI",
+    "NDC FARE", "SME FARE", "CORPORATE FARE", "STUDENT FARE",
+    "SENIOR CITIZEN FARE", "ARMED FORCES FARE", "SPECIAL FARE",
+    "RETAIL FARE", "TOUR FARE", "OTHERS",
 )
 PASSENGER_TITLES = ("Mr", "Mrs", "Ms", "Mstr", "Dr")
 PASSENGER_TYPES = ("Adult", "Child", "Infant")
@@ -1858,6 +1861,61 @@ def extract_barcode_from_pdf_bytes(pdf_bytes):
     except Exception as exc:
         log.warning("Could not auto-extract barcode from PDF: %s", exc)
     return None, None
+
+
+def build_barcode_payload(*, pnr, flight, passengers, booking_id):
+    """The text a gate scanner reads off the ticket.
+
+    Code 128 holds one short field, so it could only ever carry the PNR. PDF417
+    is a 2D symbology with room for the whole segment, so the scan identifies
+    the flight rather than just the booking.
+    """
+    lead = passengers[0] if passengers else {}
+    name = " ".join(part for part in (lead.get("title"), lead.get("name")) if part)
+    fields = (
+        ("PNR", pnr),
+        ("BKG", booking_id),
+        ("PAX", name.upper()),
+        ("FLT", (flight.get("flight_no") or "").upper()),
+        ("FROM", flight.get("from_code")),
+        ("TO", flight.get("to_code")),
+        ("DATE", flight.get("date_raw") or flight.get("date")),
+        ("DEP", flight.get("dep_time_raw")),
+        ("ARR", flight.get("arr_time_raw")),
+        ("CLS", flight.get("class")),
+        ("SEAT", flight.get("seat")),
+    )
+    return "|".join(f"{key}:{str(value).strip()}"
+                    for key, value in fields if str(value or "").strip())
+
+
+def generate_pdf417_barcode(payload, scale=3, ratio=3, padding=4):
+    """Render `payload` as a PDF417 symbol, or return (None, None).
+
+    Falls back rather than raising: a ticket without a scannable symbol is
+    still a valid ticket, but one that fails to render is not a ticket at all.
+    """
+    text = (payload or "").strip()
+    if not text:
+        return None, None
+    try:
+        from pdf417gen import encode, render_image
+        codes = encode(text, columns=6, security_level=4)
+        img = render_image(codes, scale=scale, ratio=ratio, padding=padding)
+        buffer = io.BytesIO()
+        img.convert("RGB").save(buffer, format="PNG")
+        raw = buffer.getvalue()
+        path = os.path.join(tempfile.gettempdir(),
+                            secure_filename(f"temp_pdf417_{uuid.uuid4()}.png"))
+        with open(path, "wb") as handle:
+            handle.write(raw)
+        if not hasattr(g, "temp_files"):
+            g.temp_files = []
+        g.temp_files.append(path)
+        return path, "data:image/png;base64," + base64.b64encode(raw).decode("ascii")
+    except Exception as exc:
+        log.warning("PDF417 barcode could not be generated: %s", exc)
+        return None, None
 
 
 def generate_code128_barcode(data, height=55, bar_width=2):
@@ -2166,14 +2224,6 @@ def generate_ticket():
                 temp_barcode_path = save_base64_barcode(bc_data)
 
         segment_pnr = request.form.get(f"{prefix}segment_pnr", "").strip()
-        if not temp_barcode_path and pnr:
-            pnr_val = segment_pnr or pnr
-            gen_path, _ = generate_code128_barcode(pnr_val)
-            if gen_path:
-                temp_barcode_path = gen_path
-                if not hasattr(g, "temp_files"):
-                    g.temp_files = []
-                g.temp_files.append(temp_barcode_path)
 
         # Auto-fill city and airport name from DB
         if not from_city and from_code in AIRPORTS_DB:
@@ -2334,12 +2384,31 @@ def generate_ticket():
             "hand_per_segment": hand_per_segment,
         })
 
+    # Scannable symbol per segment. Generated here rather than in the flight
+    # loop above because the payload names the traveller, who is only known
+    # once the passenger rows have been read.
+    for flight in flights:
+        if flight.get("barcode_path"):
+            continue
+        payload = build_barcode_payload(
+            pnr=flight.get("segment_pnr") or pnr,
+            flight=flight, passengers=passengers, booking_id=booking_id)
+        bc_path, _ = generate_pdf417_barcode(payload)
+        if bc_path:
+            flight["barcode_path"] = bc_path
+
     # ── Fare ─────────────────────────────────────────────────
     # The ticket prints one figure, the amount paid, so that is the one figure
     # the agent enters: the net price they want the traveller to see. A split
     # into base fare and taxes was only ever summed back up before printing.
     fare_errors = []
-    total_fare = parse_money(request.form.get("net_price"), "Net Price", fare_errors, required=True)
+    net_price = parse_money(request.form.get("net_price"), "Net Price", fare_errors, required=True)
+    # The agent's margin. It is added into the one figure the ticket prints;
+    # the traveller never sees it broken out.
+    markup = parse_money(request.form.get("markup"), "Markup", fare_errors)
+    total_fare = net_price + markup
+    if not fare_errors and total_fare < 0:
+        fare_errors.append("Net Price plus Markup cannot be negative.")
 
     errors = (
         validate_booking(request.form)
@@ -2373,7 +2442,7 @@ def generate_ticket():
             draw_layover(t, f"{flight['layover']} in {flight.get('from_city') or flight.get('from_code')}")
         draw_flight(t, flight, index, len(flights))
 
-    t.section("Passengers", at=PAX_LABEL_BASE_MM)
+    t.section("Travellers", at=PAX_LABEL_BASE_MM)
     draw_passengers(t, passengers, flights)
 
     draw_fares(t, total_fare_str, remarks=remarks,
@@ -2390,12 +2459,12 @@ def generate_ticket():
         t,
         company=selected_agency,
         show_agency=not hide_agency,
-        issued=f"Issued {issued_at.strftime('%d %b %Y, %H:%M')} IST"
-               f"  ·  {fare_type}  ·  {refund_status}",
+        issued=f"Issued {issued_at.strftime('%d %b %Y, %H:%M')} IST  ·  {fare_type}",
         contact_line=contact_line,
-        terms="Show your barcode at the airport entry gate — it covers every flight on this "
-              "ticket. The PNR and ticket number above are your proof of purchase; keep this "
-              "document handy until after travel.",
+        refund_status=refund_status,
+        # Everything the traveller has to act on is in Additional Information
+        # above; repeating it here only made the foot of the ticket read twice.
+        terms="",
     )
 
     t.save()

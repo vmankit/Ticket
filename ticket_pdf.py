@@ -34,10 +34,14 @@ CONTENT_W = PAGE_W - 2 * MARGIN
 LOGO_TOP_MM, LOGO_SIZE_MM = 12.0, 10.5
 BRAND_BASE_MM = 17.0
 SUB_AGENCY_BASE_MM = 21.6
-PNR_LABEL_BASE_MM = 17.0
-PNR_BASE_MM = 26.0
+ADDR_BASE_MM = 25.3               # address, on its own line under the phone
+ADDR_LEADING_MM = 3.2
+ADDR_MAX_LINES = 2
+PNR_LABEL_BASE_MM = 15.4
+PNR_BOX_TOP_MM = 17.4             # rounded badge the code sits in
+PNR_BOX_H_MM = 9.6
 DIVIDER_BASE_MM = 29.5
-META_BASE_MM = 34.0
+META_GAP_MM = 4.5                 # divider to the metadata strip
 
 # Itinerary
 ITINERARY_BASE_MM = 42.0
@@ -79,7 +83,7 @@ PAX_ROW_DY_MM = 7.9         # row baseline, below the row top
 PAX_CELL_INSET_MM = 4.2
 # Column bands as a fraction of the table width, from the reference.
 PAX_COLUMNS = (
-    ("PASSENGER", 0.3000),
+    ("TRAVELLER", 0.3000),
     ("SECTOR", 0.1400),
     ("PNR", 0.1200),
     ("SEAT", 0.0900),
@@ -143,6 +147,19 @@ STATUS_COLORS = {
     "Waitlisted": HexColor("#B45309"),
     "Cancelled": HexColor("#B91C1C"),
     "Refunded": HexColor("#6B7280"),
+}
+
+# Whether a ticket can be refunded is the line travellers ask about most, so
+# it is a pill rather than another phrase in the footer's grey run-on.
+REFUND_TINTS = {
+    "Refundable": HexColor("#E8F3EC"),
+    "Partially Refundable": HexColor("#FBF1E3"),
+    "Non-Refundable": HexColor("#FBEAE8"),
+}
+REFUND_COLORS = {
+    "Refundable": HexColor("#15803D"),
+    "Partially Refundable": HexColor("#B45309"),
+    "Non-Refundable": HexColor("#B91C1C"),
 }
 
 
@@ -275,15 +292,16 @@ def draw_header(t, *, company, pnr, booking_id, status, show_agency=True):
         t.text(MARGIN + size / 2, t.at(LOGO_TOP_MM) - size / 2 - 3.5, initials or "JS",
                size=11, font=FONT_BOLD, color=white, align="center")
 
-    # The PNR block is measured before anything on the left is drawn: a
-    # merged itinerary carries one PNR per segment ("ABCD12 / WXYZ34"), which
-    # is wide enough to reach back over the agency's address unless the
-    # address is held to whatever room the code leaves.
+    # The PNR badge is measured before anything on the left is drawn: a merged
+    # itinerary carries one PNR per segment ("ABCD12 / WXYZ34"), and the agency
+    # block has to be held to whatever room the badge leaves.
     pnr_text = pnr or "—"
-    pnr_size = 28.0
-    while pnr_size > 12 and t.c.stringWidth(pnr_text, FONT_BOLD, pnr_size) > CONTENT_W * 0.5:
+    pnr_size = 19.0
+    pnr_pad = 3.8 * MM
+    while pnr_size > 10 and t.c.stringWidth(pnr_text, FONT_BOLD, pnr_size) + 2 * pnr_pad > CONTENT_W * 0.52:
         pnr_size -= 0.5
-    agency_limit = right - t.c.stringWidth(pnr_text, FONT_BOLD, pnr_size) - 5.0 * MM
+    pnr_box_w = t.c.stringWidth(pnr_text, FONT_BOLD, pnr_size) + 2 * pnr_pad
+    agency_limit = right - pnr_box_w - 6.0 * MM
 
     wordmark = company["name"].upper() if show_agency else "E-TICKET"
     brand_x = (MARGIN + size + 3.0 * MM) if show_agency else MARGIN
@@ -302,42 +320,40 @@ def draw_header(t, *, company, pnr, booking_id, status, show_agency=True):
     if addr.endswith(", India"):
         addr = addr[:-7].strip()
 
+    addr_bottom_mm = SUB_AGENCY_BASE_MM
     if show_agency and (phone or addr):
-        sub_y = t.at(SUB_AGENCY_BASE_MM)
-        cursor_x = brand_x
         if phone:
-            t.text(cursor_x, sub_y, phone, size=8.5, font=FONT_BOLD, color=BODY)
-            cursor_x += t.c.stringWidth(phone, FONT_BOLD, 8.5) + 3.0 * MM
-            if addr:
-                t.text(cursor_x - 1.5 * MM, sub_y, "·", size=9.0, font=FONT_BOLD, color=FAINT)
-                cursor_x += 2.0 * MM
+            t.text(brand_x, t.at(SUB_AGENCY_BASE_MM), phone, size=8.5, font=FONT_BOLD, color=BODY)
+        # The address gets its own line rather than sharing one with the phone:
+        # a full street address could not fit beside it and was being cut off.
         if addr:
-            max_w = agency_limit - cursor_x
-            addr_size = 8.0
-            while addr_size > 6.0 and t.c.stringWidth(addr, FONT, addr_size) > max_w:
-                addr_size -= 0.2
-            # Still too long at the smallest readable size: trim it rather
-            # than let it run under the PNR.
-            if t.c.stringWidth(addr, FONT, addr_size) > max_w:
-                while addr and t.c.stringWidth(addr + "…", FONT, addr_size) > max_w:
-                    addr = addr[:-1].rstrip(" ,-")
-                addr += "…" if addr else ""
-            if addr:
-                t.text(cursor_x, sub_y, addr, size=addr_size, font=FONT, color=MUTED)
+            lines = _wrap_to_width(t.c, addr, agency_limit - brand_x, 8.0, ADDR_MAX_LINES)
+            for n, line in enumerate(lines):
+                t.text(brand_x, t.at(ADDR_BASE_MM + n * ADDR_LEADING_MM), line,
+                       size=8.0, font=FONT, color=MUTED)
+            if lines:
+                addr_bottom_mm = ADDR_BASE_MM + (len(lines) - 1) * ADDR_LEADING_MM
 
-    # PNR block on the right, at the size measured above.
+    # PNR badge on the right: a rounded box so the code reads as one token even
+    # when it carries a segment PNR per flight.
     pnr_label = "PNRs" if pnr and "/" in pnr else "PNR"
     label_w = t.c.stringWidth(pnr_label, FONT_BOLD, 8) + 3 * 2.6
     t.tracked(right - label_w, t.at(PNR_LABEL_BASE_MM), pnr_label, size=8, tracking=2.6)
-    t.text(right, t.at(PNR_BASE_MM), pnr_text, size=pnr_size,
-           font=FONT_BOLD, color=INK, align="right")
+    box_h = PNR_BOX_H_MM * MM
+    box_top = t.at(PNR_BOX_TOP_MM)
+    t.rounded(right - pnr_box_w, box_top - box_h, pnr_box_w, box_h,
+              2.6 * MM, fill=WASH, stroke=LINE)
+    t.text(right - pnr_pad, box_top - box_h + (box_h - pnr_size * 0.716) / 2,
+           pnr_text, size=pnr_size, font=FONT_BOLD, color=INK, align="right")
 
-    # Hairline divider between Branding and Ticket Metadata
-    bar_y = t.at(DIVIDER_BASE_MM)
+    # Hairline divider, below whichever side runs deeper.
+    divider_mm = max(DIVIDER_BASE_MM, addr_bottom_mm + 2.8, PNR_BOX_TOP_MM + PNR_BOX_H_MM + 2.4)
+    bar_y = t.at(divider_mm)
     t.rule(MARGIN, bar_y, CONTENT_W, color=HexColor("#EEF0F3"), line_width=0.75)
 
     # Metadata strip: E-ticket · Booking ID on left, Status badge right-aligned
-    meta_y = t.at(META_BASE_MM)
+    meta_mm = divider_mm + META_GAP_MM
+    meta_y = t.at(meta_mm)
     if show_agency:
         t.tracked(MARGIN, meta_y, "E-TICKET", size=8.0, tracking=1.5, color=MUTED)
         et_w = t.c.stringWidth("E-TICKET", FONT_BOLD, 8.0) + 7 * 1.5
@@ -354,7 +370,7 @@ def draw_header(t, *, company, pnr, booking_id, status, show_agency=True):
     t.pill(right - pill_w, meta_y - 2.2, status_str,
            fill=tint, color=colour, size=7.0, pad=3.0 * MM, height=4.8 * MM)
 
-    t.y = t.at(META_BASE_MM + 2.5)
+    t.y = t.at(meta_mm + 2.5)
 
 
 # Half a top-down airliner, nose at +x; mirrored about y to draw the whole.
@@ -992,7 +1008,8 @@ def draw_fares(t, total_str, *, remarks, gst_company, gstin, show_amount=True):
                            escape("  \u00b7  ".join(details)), size=7.5, leading=4.2 * MM)
 
 
-def draw_footer(t, *, company=None, issued, contact_line="", terms="", show_agency=True):
+def draw_footer(t, *, company=None, issued, contact_line="", terms="",
+                refund_status="", show_agency=True):
     # Measure first: this is the last block on the page, so it only needs to
     # clear the bottom margin, not the larger gap `space()` reserves for cards.
     style = ParagraphStyle("p", fontName=FONT, fontSize=8, leading=TERMS_LEADING_MM * MM)
@@ -1006,6 +1023,14 @@ def draw_footer(t, *, company=None, issued, contact_line="", terms="", show_agen
     t.rule(MARGIN, t.y, CONTENT_W, color=HexColor("#EEF0F3"), line_width=0.75)
     t.y -= ISSUED_GAP_MM * MM
     t.text(MARGIN, t.y, issued, size=8, color=FAINT)
+    if refund_status:
+        label = refund_status.upper()
+        pad = 3.0 * MM
+        pill_w = t.c.stringWidth(label, FONT_BOLD, 7.0) + 2 * pad
+        t.pill(PAGE_W - MARGIN - pill_w, t.y - 2.2, label,
+               fill=REFUND_TINTS.get(refund_status, REFUND_TINTS["Refundable"]),
+               color=REFUND_COLORS.get(refund_status, REFUND_COLORS["Refundable"]),
+               size=7.0, pad=pad, height=4.8 * MM)
 
     t.y -= 1.7 * MM
     height = t.paragraph(MARGIN, t.y, CONTENT_W, terms, size=8, leading=TERMS_LEADING_MM * MM)

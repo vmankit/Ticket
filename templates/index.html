@@ -490,18 +490,18 @@ Example:
                 </div>
             </div>
 
-            <!-- ═══ Passenger Details ═══ -->
+            <!-- ═══ Traveller Details ═══ -->
             <div class="card">
                 <div class="card-header">
                     <div class="icon">PX</div>
-                    <h2>Passenger Details</h2>
+                    <h2>Traveller Details</h2>
                 </div>
                 <div class="card-body">
                     <input type="hidden" name="pax_count" id="paxCount" value="1">
                     <div id="paxContainer"></div>
 
                     <button type="button" class="btn-add-pax" onclick="addPassenger()">
-                        Add Passenger
+                        Add Traveller
                     </button>
                 </div>
             </div>
@@ -518,7 +518,12 @@ Example:
                         <div class="form-group">
                             <label>Net Price (INR) <span class="req">*</span></label>
                             <input type="number" step="0.01" min="0" name="net_price" id="netPrice" placeholder="e.g. 17045" required oninput="calcTotal()">
-                            <div class="helper">Ticket par yahi amount chhapega.</div>
+                            <div class="helper">PDF se aaya hua fare. Markup isme jud jayega.</div>
+                        </div>
+                        <div class="form-group">
+                            <label>Markup (INR)</label>
+                            <input type="number" step="0.01" name="markup" id="markup" value="0" oninput="calcTotal()">
+                            <div class="helper" id="markupHelper">Ticket par sirf total chhapega, markup alag se nahi.</div>
                         </div>
                     </div>
                 </div>
@@ -560,9 +565,15 @@ function showToast(msg,dur=3000){const t=document.getElementById('toast');t.text
 
 // ─── Fare calculation ─────────────────────────────────────
 function calcTotal(){
-    const total=parseFloat(document.getElementById('netPrice').value)||0;
+    const net=parseFloat(document.getElementById('netPrice').value)||0;
+    const markup=parseFloat((document.getElementById('markup')||{}).value)||0;
+    const total=net+markup;
     document.getElementById('fareTotalDisplay').textContent=
         'INR '+total.toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2});
+    const helper=document.getElementById('markupHelper');
+    if(helper) helper.textContent = markup
+        ? `Ticket par ${total.toLocaleString('en-IN')} chhapega (${net.toLocaleString('en-IN')} + ${markup.toLocaleString('en-IN')}).`
+        : 'Ticket par sirf total chhapega, markup alag se nahi.';
 }
 
 // ─── Time helpers ─────────────────────────────────────────
@@ -889,7 +900,7 @@ function detectAirline(input,idx){
     }
 }
 
-// ─── Add Passenger ────────────────────────────────────────
+// ─── Add Traveller ────────────────────────────────────────
 function addPassenger(){
     const i=paxIdx++;
     const container=document.getElementById('paxContainer');

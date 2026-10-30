@@ -36,11 +36,12 @@ SUB_AGENCY_BASE_MM = 21.6
 ADDR_BASE_MM = 25.3               # address, on its own line under the phone
 ADDR_LEADING_MM = 3.2
 ADDR_MAX_LINES = 2
-PNR_LABEL_BASE_MM = 15.4
-PNR_BOX_TOP_MM = 17.4             # rounded badge the code sits in
+ETICKET_BASE_MM = 12.2            # document type, centred over the header
+STATUS_BASE_MM = 12.2             # status pill, right, level with it
+PNR_LABEL_BASE_MM = 17.6
+PNR_BOX_TOP_MM = 19.6             # rounded badge the code sits in
 PNR_BOX_H_MM = 9.6
-DIVIDER_BASE_MM = 29.5
-META_GAP_MM = 4.5                 # divider to the metadata strip
+DIVIDER_BASE_MM = 32.4
 
 # Itinerary
 ITINERARY_BASE_MM = 42.0
@@ -278,13 +279,10 @@ def _fmt(value, fallback="—"):
 def draw_header(t, *, company, pnr, booking_id, status, show_agency=True):
     """Clean, balanced two-tier executive airline header.
 
-    Tier 1 (Branding & Reference):
-      - Left: Monogram mark [JS] + Agency Name + Unified Contact/Address line
-      - Right: PNR label + Large PNR code
-    Tier 2 (Metadata Strip):
-      - Hairline separator rule
-      - Left: E-TICKET · Booking ID
-      - Right: Status badge aligned to right margin
+    Three columns over one hairline:
+      - Left:   agency name, phone, address
+      - Centre: E-TICKET, naming the document
+      - Right:  status pill over the PNR badge
     """
     right = PAGE_W - MARGIN
 
@@ -330,11 +328,28 @@ def draw_header(t, *, company, pnr, booking_id, status, show_agency=True):
             if lines:
                 addr_bottom_mm = ADDR_BASE_MM + (len(lines) - 1) * ADDR_LEADING_MM
 
-    # PNR badge on the right: a rounded box so the code reads as one token even
-    # when it carries a segment PNR per flight.
+    # Centre: what the document is. The supplier's booking reference that used
+    # to sit here is a 20-character internal id that means nothing to the
+    # traveller and nothing at a gate, where the PNR is what gets quoted.
+    label = "E-TICKET"
+    tracking = 2.4
+    label_w = t.c.stringWidth(label, FONT_BOLD, 8.4) + (len(label) - 1) * tracking
+    t.tracked(PAGE_W / 2 - label_w / 2, t.at(ETICKET_BASE_MM), label,
+              size=8.4, tracking=tracking, color=MUTED)
+
+    # Right: status over the PNR badge, so the two references read together.
+    status_str = status.upper()
+    pill_w = t.c.stringWidth(status_str, FONT_BOLD, 7.0) + 2 * (3.0 * MM)
+    t.pill(right - pill_w, t.at(STATUS_BASE_MM) - 2.2, status_str,
+           fill=STATUS_TINTS.get(status, STATUS_TINTS["Confirmed"]),
+           color=STATUS_COLORS.get(status, STATUS_COLORS["Confirmed"]),
+           size=7.0, pad=3.0 * MM, height=4.8 * MM)
+
+    # A rounded box, so the code reads as one token even when it carries a
+    # segment PNR per flight.
     pnr_label = "PNRs" if pnr and "/" in pnr else "PNR"
-    label_w = t.c.stringWidth(pnr_label, FONT_BOLD, 8) + 3 * 2.6
-    t.tracked(right - label_w, t.at(PNR_LABEL_BASE_MM), pnr_label, size=8, tracking=2.6)
+    pnr_label_w = t.c.stringWidth(pnr_label, FONT_BOLD, 8) + 3 * 2.6
+    t.tracked(right - pnr_label_w, t.at(PNR_LABEL_BASE_MM), pnr_label, size=8, tracking=2.6)
     box_h = PNR_BOX_H_MM * MM
     box_top = t.at(PNR_BOX_TOP_MM)
     t.rounded(right - pnr_box_w, box_top - box_h, pnr_box_w, box_h,
@@ -342,31 +357,11 @@ def draw_header(t, *, company, pnr, booking_id, status, show_agency=True):
     t.text(right - pnr_pad, box_top - box_h + (box_h - pnr_size * 0.716) / 2,
            pnr_text, size=pnr_size, font=FONT_BOLD, color=INK, align="right")
 
-    # Hairline divider, below whichever side runs deeper.
-    divider_mm = max(DIVIDER_BASE_MM, addr_bottom_mm + 2.8, PNR_BOX_TOP_MM + PNR_BOX_H_MM + 2.4)
-    bar_y = t.at(divider_mm)
-    t.rule(MARGIN, bar_y, CONTENT_W, color=HexColor("#EEF0F3"), line_width=0.75)
-
-    # Metadata strip: E-ticket · Booking ID on left, Status badge right-aligned
-    meta_mm = divider_mm + META_GAP_MM
-    meta_y = t.at(meta_mm)
-    # The supplier's booking reference is not printed: it is a 20-character
-    # internal id that means nothing to the traveller and nothing at a gate,
-    # where the PNR above is what gets quoted. It is still recorded against
-    # the booking.
-    if show_agency:
-        t.tracked(MARGIN, meta_y, "E-TICKET", size=8.0, tracking=1.5, color=MUTED)
-    else:
-        t.text(MARGIN, meta_y, "E-Ticket", size=8.8, color=MUTED)
-
-    status_str = status.upper()
-    colour = STATUS_COLORS.get(status, STATUS_COLORS["Confirmed"])
-    tint = STATUS_TINTS.get(status, STATUS_TINTS["Confirmed"])
-    pill_w = t.c.stringWidth(status_str, FONT_BOLD, 7.0) + 2 * (3.0 * MM)
-    t.pill(right - pill_w, meta_y - 2.2, status_str,
-           fill=tint, color=colour, size=7.0, pad=3.0 * MM, height=4.8 * MM)
-
-    t.y = t.at(meta_mm + 2.5)
+    # Hairline divider, below whichever column runs deeper.
+    divider_mm = max(DIVIDER_BASE_MM, addr_bottom_mm + 3.2,
+                     PNR_BOX_TOP_MM + PNR_BOX_H_MM + 2.8)
+    t.rule(MARGIN, t.at(divider_mm), CONTENT_W, color=HexColor("#EEF0F3"), line_width=0.75)
+    t.y = t.at(divider_mm)
 
 
 # Half a top-down airliner, nose at +x; mirrored about y to draw the whole.

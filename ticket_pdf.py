@@ -31,16 +31,16 @@ MARGIN = MARGIN_MM * MM
 CONTENT_W = PAGE_W - 2 * MARGIN
 
 # Header
-BRAND_BASE_MM = 17.0
-SUB_AGENCY_BASE_MM = 21.6
-ADDR_BASE_MM = 25.3               # address, on its own line under the phone
-ADDR_LEADING_MM = 3.2
-ADDR_MAX_LINES = 2
-ETICKET_BASE_MM = 12.2            # document type, centred over the header
-STATUS_BASE_MM = 12.2             # status pill, right, level with it
-PNR_LABEL_BASE_MM = 17.6
-PNR_BOX_TOP_MM = 19.6             # rounded badge the code sits in
-PNR_BOX_H_MM = 9.6
+# One band, three columns, two rows. Everything on the top row shares a
+# baseline so the columns read as one line rather than a staggered stack.
+BRAND_BASE_MM = 17.0              # agency name, left
+ETICKET_BASE_MM = 17.0            # document type, centred
+STATUS_BASE_MM = 17.0             # status pill, right
+CONTACT_BASE_MM = 22.6            # phone and address, one quiet line under the name
+CONTACT_LEADING_MM = 3.2
+CONTACT_MAX_LINES = 2
+PNR_BOX_TOP_MM = 20.4             # rounded badge the code sits in, under the pill
+PNR_BOX_H_MM = 9.2
 DIVIDER_BASE_MM = 32.4
 
 # Itinerary
@@ -290,11 +290,18 @@ def draw_header(t, *, company, pnr, booking_id, status, show_agency=True):
     # itinerary carries one PNR per segment ("ABCD12 / WXYZ34"), and the agency
     # block has to be held to whatever room the badge leaves.
     pnr_text = pnr or "—"
+    pnr_label = "PNRs" if pnr and "/" in pnr else "PNR"
+    pnr_label_w = t.c.stringWidth(pnr_label, FONT_BOLD, 7) + len(pnr_label) * 1.6
     pnr_size = 19.0
     pnr_pad = 3.8 * MM
-    while pnr_size > 10 and t.c.stringWidth(pnr_text, FONT_BOLD, pnr_size) + 2 * pnr_pad > CONTENT_W * 0.52:
+
+    def _badge_w(size):
+        return (pnr_label_w + 3.0 * MM
+                + t.c.stringWidth(pnr_text, FONT_BOLD, size) + 2 * pnr_pad)
+
+    while pnr_size > 10 and _badge_w(pnr_size) > CONTENT_W * 0.52:
         pnr_size -= 0.5
-    pnr_box_w = t.c.stringWidth(pnr_text, FONT_BOLD, pnr_size) + 2 * pnr_pad
+    pnr_box_w = _badge_w(pnr_size)
     agency_limit = right - pnr_box_w - 6.0 * MM
 
     wordmark = company["name"].upper() if show_agency else "E-TICKET"
@@ -305,7 +312,6 @@ def draw_header(t, *, company, pnr, booking_id, status, show_agency=True):
         brand_size -= 0.25
     t.text(brand_x, t.at(BRAND_BASE_MM), wordmark, size=brand_size, font=FONT_BOLD, color=INK)
 
-    # Unified contact & address line beside the monogram
     phone = (company.get("phone") or "").strip()
     addr = (company.get("address") or "").strip()
     pincode = (company.get("pincode") or "").strip()
@@ -314,19 +320,19 @@ def draw_header(t, *, company, pnr, booking_id, status, show_agency=True):
     if addr.endswith(", India"):
         addr = addr[:-7].strip()
 
-    addr_bottom_mm = SUB_AGENCY_BASE_MM
-    if show_agency and (phone or addr):
-        if phone:
-            t.text(brand_x, t.at(SUB_AGENCY_BASE_MM), phone, size=8.5, font=FONT_BOLD, color=BODY)
-        # The address gets its own line rather than sharing one with the phone:
-        # a full street address could not fit beside it and was being cut off.
-        if addr:
-            lines = _wrap_to_width(t.c, addr, agency_limit - brand_x, 8.0, ADDR_MAX_LINES)
+    # Phone and address as one quiet line under the name. They were two lines
+    # with the phone set bold, which gave the block three competing weights
+    # and made it read as a stack rather than as one supporting line.
+    contact_bottom_mm = BRAND_BASE_MM
+    if show_agency:
+        contact = "  ·  ".join(part for part in (phone, addr) if part)
+        if contact:
+            lines = _wrap_to_width(t.c, contact, agency_limit - brand_x, 8.0, CONTACT_MAX_LINES)
             for n, line in enumerate(lines):
-                t.text(brand_x, t.at(ADDR_BASE_MM + n * ADDR_LEADING_MM), line,
+                t.text(brand_x, t.at(CONTACT_BASE_MM + n * CONTACT_LEADING_MM), line,
                        size=8.0, font=FONT, color=MUTED)
             if lines:
-                addr_bottom_mm = ADDR_BASE_MM + (len(lines) - 1) * ADDR_LEADING_MM
+                contact_bottom_mm = CONTACT_BASE_MM + (len(lines) - 1) * CONTACT_LEADING_MM
 
     # Centre: what the document is. The supplier's booking reference that used
     # to sit here is a 20-character internal id that means nothing to the
@@ -346,19 +352,20 @@ def draw_header(t, *, company, pnr, booking_id, status, show_agency=True):
            size=7.0, pad=3.0 * MM, height=4.8 * MM)
 
     # A rounded box, so the code reads as one token even when it carries a
-    # segment PNR per flight.
-    pnr_label = "PNRs" if pnr and "/" in pnr else "PNR"
-    pnr_label_w = t.c.stringWidth(pnr_label, FONT_BOLD, 8) + 3 * 2.6
-    t.tracked(right - pnr_label_w, t.at(PNR_LABEL_BASE_MM), pnr_label, size=8, tracking=2.6)
+    # segment PNR per flight. The label goes inside it rather than floating
+    # above, which left a third loose item stacked in the right column.
     box_h = PNR_BOX_H_MM * MM
     box_top = t.at(PNR_BOX_TOP_MM)
     t.rounded(right - pnr_box_w, box_top - box_h, pnr_box_w, box_h,
               2.6 * MM, fill=WASH, stroke=LINE)
-    t.text(right - pnr_pad, box_top - box_h + (box_h - pnr_size * 0.716) / 2,
-           pnr_text, size=pnr_size, font=FONT_BOLD, color=INK, align="right")
+    baseline = box_top - box_h + (box_h - pnr_size * 0.716) / 2
+    t.text(right - pnr_pad, baseline, pnr_text, size=pnr_size,
+           font=FONT_BOLD, color=INK, align="right")
+    t.tracked(right - pnr_box_w + pnr_pad, baseline, pnr_label,
+              size=7, tracking=1.6, color=FAINT)
 
     # Hairline divider, below whichever column runs deeper.
-    divider_mm = max(DIVIDER_BASE_MM, addr_bottom_mm + 3.2,
+    divider_mm = max(DIVIDER_BASE_MM, contact_bottom_mm + 3.2,
                      PNR_BOX_TOP_MM + PNR_BOX_H_MM + 2.8)
     t.rule(MARGIN, t.at(divider_mm), CONTENT_W, color=HexColor("#EEF0F3"), line_width=0.75)
     t.y = t.at(divider_mm)

@@ -45,6 +45,7 @@ from ticket_pdf import (
     draw_passengers,
 )
 from ticket_parsing import (
+    STANDARD_AIRLINES,
     looks_like_own_ticket,
     normalize_text,
     OCR_PAGE_TEXT_FLOOR,
@@ -159,55 +160,9 @@ DEFAULT_AGENCY_ID = "js_julfaqar"
 COMPANY = AGENCIES[DEFAULT_AGENCY_ID]
 
 # ─── Airline Database (comprehensive) ───────────────────────────────
-AIRLINES = {
-    # Indian Airlines
-    "6E": "IndiGo", "AI": "Air India", "UK": "Vistara", "SG": "SpiceJet",
-    "G8": "Go First", "QP": "Akasa Air", "I5": "AirAsia India",
-    "IX": "Air India Express", "S5": "Star Air", "2T": "TruJet",
-    "9I": "Alliance Air", "8Y": "Pan Pacific Airlines", "E5": "Air Arabia India",
-    # Middle East
-    "EK": "Emirates", "EY": "Etihad Airways", "QR": "Qatar Airways",
-    "FZ": "flydubai", "WY": "Oman Air", "GF": "Gulf Air", "SV": "Saudia",
-    "XY": "flynas", "G9": "Air Arabia", "KU": "Kuwait Airways",
-    "RJ": "Royal Jordanian", "ME": "Middle East Airlines",
-    # Asia-Pacific
-    "SQ": "Singapore Airlines", "TG": "Thai Airways",
-    "MH": "Malaysia Airlines", "GA": "Garuda Indonesia",
-    "CX": "Cathay Pacific", "PR": "Philippine Airlines",
-    "VN": "Vietnam Airlines", "KE": "Korean Air", "OZ": "Asiana Airlines",
-    "NH": "ANA (All Nippon Airways)", "JL": "Japan Airlines",
-    "CI": "China Airlines", "BR": "EVA Air",
-    "CZ": "China Southern Airlines", "MU": "China Eastern Airlines",
-    "CA": "Air China", "HU": "Hainan Airlines",
-    "3K": "Jetstar Asia", "TR": "Scoot", "AK": "AirAsia",
-    "FD": "Thai AirAsia", "QZ": "Indonesia AirAsia",
-    "UL": "SriLankan Airlines", "RA": "Nepal Airlines",
-    "BG": "Biman Bangladesh Airlines", "PK": "Pakistan International Airlines",
-    "WS": "WestJet",
-    # Europe
-    "BA": "British Airways", "LH": "Lufthansa", "AF": "Air France",
-    "KL": "KLM Royal Dutch Airlines", "LX": "SWISS",
-    "OS": "Austrian Airlines", "AZ": "ITA Airways", "IB": "Iberia",
-    "SK": "SAS Scandinavian Airlines", "AY": "Finnair",
-    "TK": "Turkish Airlines", "LO": "LOT Polish Airlines",
-    "TP": "TAP Air Portugal", "EI": "Aer Lingus",
-    "SN": "Brussels Airlines", "RO": "TAROM", "JU": "Air Serbia",
-    "OU": "Croatia Airlines", "FR": "Ryanair", "U2": "easyJet",
-    "W6": "Wizz Air", "VY": "Vueling", "DY": "Norwegian Air",
-    # Americas
-    "AA": "American Airlines", "UA": "United Airlines",
-    "DL": "Delta Air Lines", "WN": "Southwest Airlines",
-    "B6": "JetBlue Airways", "AS": "Alaska Airlines",
-    "NK": "Spirit Airlines", "F9": "Frontier Airlines",
-    "HA": "Hawaiian Airlines", "AC": "Air Canada",
-    "AM": "Aeromexico", "LA": "LATAM Airlines", "AV": "Avianca",
-    "CM": "Copa Airlines", "G3": "Gol Linhas Aéreas",
-    # Oceania & Africa
-    "QF": "Qantas", "NZ": "Air New Zealand", "VA": "Virgin Australia",
-    "JQ": "Jetstar", "ET": "Ethiopian Airlines",
-    "SA": "South African Airways", "MS": "EgyptAir",
-    "KQ": "Kenya Airways", "AT": "Royal Air Maroc", "WB": "RwandAir",
-}
+# Single source of truth lives in ticket_parsing.STANDARD_AIRLINES, so the
+# parsers and the rest of the app always agree on which carriers exist.
+AIRLINES = dict(STANDARD_AIRLINES)
 
 # ICAO / common 3-letter aliases mapped to their IATA code.
 # This lets entries like "AIX 123" resolve the same way as "IX 123".
@@ -218,27 +173,45 @@ AIRLINE_ALIASES = {
     # Middle East
     "UAE": "EK", "ETD": "EY", "QTR": "QR", "FDB": "FZ", "OMA": "WY",
     "GFA": "GF", "SVA": "SV", "KAC": "KU", "RJA": "RJ", "MEA": "ME",
-    "ABY": "G9",
+    "ABY": "G9", "FAD": "F3", "JZR": "J9", "OMS": "OV", "IYE": "IY",
+    "ELY": "LY", "IRM": "W5", "IRA": "IR", "NAS": "XY",
     # Asia-Pacific
     "SIA": "SQ", "THA": "TG", "MAS": "MH", "GIA": "GA", "CPA": "CX",
     "PAL": "PR", "HVN": "VN", "KAL": "KE", "AAR": "OZ", "ANA": "NH",
     "JAL": "JL", "CAL": "CI", "EVA": "BR", "CSN": "CZ", "CES": "MU",
     "CCA": "CA", "CHH": "HU", "JSA": "3K", "TGW": "TR", "AXM": "AK",
     "AIQ": "FD", "AWQ": "QZ", "ALK": "UL", "RNA": "RA", "BBC": "BG",
-    "PIA": "PK", "WJA": "WS",
+    "PIA": "PK",
+    "VJC": "VJ", "BAV": "QH", "BKP": "PG", "TLM": "SL", "NOK": "DD",
+    "TVJ": "VZ", "LNI": "JT", "BTK": "ID", "MXD": "OD", "FFM": "FY",
+    "RBA": "BI", "CEB": "5J", "APJ": "MM", "JJA": "7C", "JNA": "LJ",
+    "TWB": "TW", "ABL": "BX", "CQH": "9C", "CXA": "MF", "CSZ": "ZH",
+    "CSC": "3U", "CRK": "HX", "HKE": "UO", "JJP": "GK", "LAO": "QV",
+    # South Asia
+    "UBG": "BS", "DRK": "KB", "BHA": "U4", "NYT": "YT", "HIM": "H9",
+    "DQA": "Q2", "ABQ": "PA",
     # Europe
     "BAW": "BA", "DLH": "LH", "AFR": "AF", "KLM": "KL", "SWR": "LX",
     "AUA": "OS", "ITY": "AZ", "IBE": "IB", "SAS": "SK", "FIN": "AY",
     "THY": "TK", "LOT": "LO", "TAP": "TP", "EIN": "EI", "BEL": "SN",
     "ROT": "RO", "ASL": "JU", "CTN": "OU", "RYR": "FR", "EZY": "U2",
     "WZZ": "W6", "VLG": "VY", "NAX": "DY",
+    "VIR": "VS", "PGT": "PC", "SXS": "XQ", "AEE": "A3", "EWG": "EW",
+    "TRA": "HV", "BTI": "BT", "ICE": "FI", "CSA": "OK", "LGL": "LG",
+    "CFG": "DE", "EXS": "LS", "WIF": "WF", "AFL": "SU", "SBI": "S7",
+    "SVR": "U6", "UTA": "UT", "KZR": "KC", "UZB": "HY", "AHY": "J2",
+    "AUI": "PS",
     # Americas
     "AAL": "AA", "UAL": "UA", "DAL": "DL", "SWA": "WN", "JBU": "B6",
     "ASA": "AS", "NKS": "NK", "FFT": "F9", "HAL": "HA", "ACA": "AC",
     "AMX": "AM", "LAN": "LA", "AVA": "AV", "CMP": "CM", "GLO": "G3",
+    "WJA": "WS", "POE": "PD", "TSC": "TS", "SCX": "SY", "VOI": "Y4",
+    "VIV": "VB", "ARG": "AR", "AZU": "AD",
     # Oceania & Africa
     "QFA": "QF", "ANZ": "NZ", "VOZ": "VA", "JST": "JQ", "ETH": "ET",
     "SAA": "SA", "MSR": "MS", "KQA": "KQ", "RAM": "AT", "RWD": "WB",
+    "FJI": "FJ", "ANG": "PX", "TAR": "TU", "DAH": "AH", "MAU": "MK",
+    "SEY": "HM", "ATC": "TC", "DTA": "DT",
 }
 
 

@@ -1625,20 +1625,90 @@ def ocr_passenger_names(pages_words):
     return names
 
 
+# The one airline table. app.py re-exports this as AIRLINES: a second copy
+# there drifted out of step with this one and left the parsers unable to name
+# carriers the rest of the app already knew about.
 STANDARD_AIRLINES = {
+    # India
     "6E": "IndiGo", "AI": "Air India", "UK": "Vistara", "SG": "SpiceJet",
     "G8": "Go First", "QP": "Akasa Air", "I5": "AirAsia India",
     "IX": "Air India Express", "S5": "Star Air", "2T": "TruJet",
     "9I": "Alliance Air", "8Y": "Pan Pacific Airlines", "E5": "Air Arabia India",
+    # Middle East
     "EK": "Emirates", "EY": "Etihad Airways", "QR": "Qatar Airways",
     "FZ": "flydubai", "WY": "Oman Air", "GF": "Gulf Air", "SV": "Saudia",
     "XY": "flynas", "G9": "Air Arabia", "KU": "Kuwait Airways",
     "RJ": "Royal Jordanian", "ME": "Middle East Airlines",
-    "SQ": "Singapore Airlines", "TG": "Thai Airways", "MH": "Malaysia Airlines",
-    "GA": "Garuda Indonesia", "CX": "Cathay Pacific", "PR": "Philippine Airlines",
+    "F3": "flyadeal", "J9": "Jazeera Airways", "OV": "SalamAir",
+    "3L": "Air Arabia Abu Dhabi", "IY": "Yemenia", "NE": "Nesma Airlines",
+    "LY": "El Al", "W5": "Mahan Air", "IR": "Iran Air",
+    "EP": "Iran Aseman Airlines",
+    # Asia-Pacific
+    "SQ": "Singapore Airlines", "TG": "Thai Airways",
+    "MH": "Malaysia Airlines", "GA": "Garuda Indonesia",
+    "CX": "Cathay Pacific", "PR": "Philippine Airlines",
     "VN": "Vietnam Airlines", "KE": "Korean Air", "OZ": "Asiana Airlines",
+    "NH": "ANA (All Nippon Airways)", "JL": "Japan Airlines",
+    "CI": "China Airlines", "BR": "EVA Air",
+    "CZ": "China Southern Airlines", "MU": "China Eastern Airlines",
+    "CA": "Air China", "HU": "Hainan Airlines",
+    "3K": "Jetstar Asia", "TR": "Scoot", "AK": "AirAsia",
+    "FD": "Thai AirAsia", "QZ": "Indonesia AirAsia",
+    "VJ": "VietJet Air", "QH": "Bamboo Airways", "PG": "Bangkok Airways",
+    "SL": "Thai Lion Air", "DD": "Nok Air", "VZ": "Thai Vietjet Air",
+    "JT": "Lion Air", "ID": "Batik Air Indonesia", "OD": "Batik Air Malaysia",
+    "FY": "Firefly", "BI": "Royal Brunei Airlines", "5J": "Cebu Pacific",
+    "Z2": "Philippines AirAsia", "MM": "Peach Aviation", "7C": "Jeju Air",
+    "LJ": "Jin Air", "TW": "T'way Air", "BX": "Air Busan",
+    "9C": "Spring Airlines", "HO": "Juneyao Air", "MF": "XiamenAir",
+    "SC": "Shandong Airlines", "ZH": "Shenzhen Airlines", "3U": "Sichuan Airlines",
+    "HX": "Hong Kong Airlines", "UO": "HK Express", "GK": "Jetstar Japan",
+    "8M": "Myanmar Airways International", "UB": "Myanmar National Airlines",
+    "QV": "Lao Airlines", "K6": "Cambodia Angkor Air",
+    # South Asia
+    "UL": "SriLankan Airlines", "RA": "Nepal Airlines",
+    "BG": "Biman Bangladesh Airlines", "PK": "Pakistan International Airlines",
+    "BS": "US-Bangla Airlines", "KB": "Drukair", "B3": "Bhutan Airlines",
+    "U4": "Buddha Air", "YT": "Yeti Airlines", "H9": "Himalaya Airlines",
+    "Q2": "Maldivian", "9P": "Fly Jinnah", "PA": "Airblue",
+    # Europe
     "BA": "British Airways", "LH": "Lufthansa", "AF": "Air France",
-    "KL": "KLM Royal Dutch Airlines", "TK": "Turkish Airlines",
+    "KL": "KLM Royal Dutch Airlines", "LX": "SWISS",
+    "OS": "Austrian Airlines", "AZ": "ITA Airways", "IB": "Iberia",
+    "SK": "SAS Scandinavian Airlines", "AY": "Finnair",
+    "TK": "Turkish Airlines", "LO": "LOT Polish Airlines",
+    "TP": "TAP Air Portugal", "EI": "Aer Lingus",
+    "SN": "Brussels Airlines", "RO": "TAROM", "JU": "Air Serbia",
+    "OU": "Croatia Airlines", "FR": "Ryanair", "U2": "easyJet",
+    "W6": "Wizz Air", "VY": "Vueling", "DY": "Norwegian Air",
+    "VS": "Virgin Atlantic", "PC": "Pegasus Airlines", "XQ": "SunExpress",
+    "A3": "Aegean Airlines", "EW": "Eurowings", "HV": "Transavia",
+    "BT": "airBaltic", "FI": "Icelandair", "OK": "Czech Airlines",
+    "LG": "Luxair", "DE": "Condor", "X3": "TUI fly", "LS": "Jet2",
+    "EN": "Air Dolomiti", "WF": "Widerøe",
+    "SU": "Aeroflot", "S7": "S7 Airlines", "U6": "Ural Airlines",
+    "UT": "UTair", "KC": "Air Astana", "HY": "Uzbekistan Airways",
+    "J2": "Azerbaijan Airlines", "PS": "Ukraine International Airlines",
+    "B2": "Belavia", "A9": "Georgian Airways",
+    # Americas
+    "AA": "American Airlines", "UA": "United Airlines",
+    "DL": "Delta Air Lines", "WN": "Southwest Airlines",
+    "B6": "JetBlue Airways", "AS": "Alaska Airlines",
+    "NK": "Spirit Airlines", "F9": "Frontier Airlines",
+    "HA": "Hawaiian Airlines", "AC": "Air Canada",
+    "AM": "Aeromexico", "LA": "LATAM Airlines", "AV": "Avianca",
+    "CM": "Copa Airlines", "G3": "Gol Linhas Aéreas",
+    "WS": "WestJet", "PD": "Porter Airlines", "TS": "Air Transat",
+    "SY": "Sun Country Airlines", "Y4": "Volaris", "VB": "Viva Aerobus",
+    "AR": "Aerolíneas Argentinas", "AD": "Azul Brazilian Airlines",
+    # Oceania & Africa
+    "QF": "Qantas", "NZ": "Air New Zealand", "VA": "Virgin Australia",
+    "JQ": "Jetstar", "ET": "Ethiopian Airlines",
+    "SA": "South African Airways", "MS": "EgyptAir",
+    "KQ": "Kenya Airways", "AT": "Royal Air Maroc", "WB": "RwandAir",
+    "FJ": "Fiji Airways", "PX": "Air Niugini",
+    "TU": "Tunisair", "AH": "Air Algérie", "MK": "Air Mauritius",
+    "HM": "Air Seychelles", "TC": "Air Tanzania", "DT": "TAAG Angola Airlines",
 }
 
 

@@ -33,6 +33,12 @@ services:
         # a free Neon or Supabase database here in the Render dashboard; unset,
         # the app falls back to the spreadsheet and loses both on every deploy.
         sync: false
+      - key: APP_PASSWORD
+        # The login passcode. Set it in the Render dashboard - it is kept out
+        # of this file and out of git on purpose, and the app refuses to boot
+        # without it, so a deploy with it unset fails loudly rather than
+        # serving the ticket tool to anyone who finds the URL.
+        sync: false
       - key: FLASK_ENV
         value: production
       - key: PYTHONUNBUFFERED

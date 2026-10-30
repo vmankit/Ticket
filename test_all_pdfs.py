@@ -4,7 +4,10 @@ import json
 import pdfplumber
 from app import extract_ticket_fields
 
-pdfs = sorted([f for f in glob.glob("*.pdf") if f not in ("sample_ticket.pdf", "my_ticket.pdf")])
+# The sample tickets live in samples/; the root is kept for code. Both are
+# scanned so a PDF dropped beside the script for a one-off check still runs.
+pdfs = sorted([f for f in glob.glob("samples/*.pdf") + glob.glob("*.pdf")
+               if os.path.basename(f) not in ("sample_ticket.pdf", "my_ticket.pdf")])
 print(f"Total PDFs found: {len(pdfs)}")
 
 results = []

@@ -277,10 +277,11 @@
                 </div>
                 <div class="card-body">
                             <div class="upload-status" id="uploadStatus" style="padding:12px 14px; color:var(--text);">
-                                Upload one or more digital PDF e-tickets to auto-extract and combine fields (e.g. connecting flights, separate PNRs).
+                                Ek flight ki ek PDF. Dono daal do — app khud merge karke ek itinerary bana dega (alag PNR ho to bhi).
                             </div>
+                            <div id="pdfSlots" style="margin-top:14px;"></div>
+                            <button type="button" class="link-toggle" onclick="addPdfSlot()">+ Add another PDF</button>
                             <div class="upload-actions" style="margin-top:14px;align-items:center;gap:12px;flex-wrap:wrap;">
-                                <input type="file" id="ticketUpload" name="ticket_pdf" accept="application/pdf" multiple style="padding:8px;">
                                 <button type="button" class="btn-generate" id="extractBtn" style="background:#0f2742;">Upload &amp; Parse PDF</button>
                                 <button type="button" class="btn-generate" id="sampleFillBtn" style="background:#666; box-shadow:0 12px 28px rgba(102,102,102,.2);">Fill Sample Ticket</button>
                             </div>
@@ -1241,13 +1242,33 @@ function getSampleTicketData(){
     };
 }
 
+// ─── PDF upload slots ─────────────────────────────────────
+// One slot per flight, so the order on screen is the order they are sent;
+// the server still sorts the merged segments by departure.
+let pdfSlotCount=0;
+function addPdfSlot(){
+    const box=document.getElementById('pdfSlots');
+    if(!box) return;
+    const n=++pdfSlotCount;
+    const row=document.createElement('div');
+    row.className='form-group';
+    row.style.marginBottom='10px';
+    row.innerHTML=`<label>PDF ${n}</label>`+
+        `<input type="file" class="pdfSlot" accept="application/pdf" style="padding:8px;">`;
+    box.appendChild(row);
+}
+function selectedPdfs(){
+    return Array.from(document.querySelectorAll('.pdfSlot'))
+        .map(el=>el.files&&el.files[0]).filter(Boolean);
+}
+addPdfSlot(); addPdfSlot();
+
 const extractBtn=document.getElementById('extractBtn');
 if(extractBtn){
     extractBtn.addEventListener('click',async()=>{
         const statusEl=document.getElementById('uploadStatus');
-        const fileInput=document.getElementById('ticketUpload');
-        const files=fileInput&&fileInput.files?Array.from(fileInput.files):[];
-        if(!files.length){statusEl.textContent='Please select at least one PDF first.';return;}
+        const files=selectedPdfs();
+        if(!files.length){statusEl.textContent='Pehle kam se kam ek PDF chuno.';return;}
         statusEl.textContent=files.length > 1 ? `Extracting & merging ${files.length} tickets...` : 'Extracting ticket details...';
         const extractHTML=extractBtn.innerHTML;
         extractBtn.disabled=true;

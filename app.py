@@ -2175,11 +2175,13 @@ def generate_ticket():
                     g.temp_files = []
                 g.temp_files.append(temp_barcode_path)
 
-        # Auto-fill city from DB
+        # Auto-fill city and airport name from DB
         if not from_city and from_code in AIRPORTS_DB:
             from_city = AIRPORTS_DB[from_code]["city"]
         if not to_city and to_code in AIRPORTS_DB:
             to_city = AIRPORTS_DB[to_code]["city"]
+        from_airport = AIRPORTS_DB.get(from_code, {}).get("airport", "")
+        to_airport = AIRPORTS_DB.get(to_code, {}).get("airport", "")
 
         # Format date
         try:
@@ -2199,7 +2201,9 @@ def generate_ticket():
             "airline": airline_name,
             "airline_code": airline_code,
             "from_code": from_code, "from_city": from_city, "from_full": from_full,
+            "from_airport": from_airport,
             "to_code": to_code, "to_city": to_city, "to_full": to_full,
+            "to_airport": to_airport,
             "date": date_display, "date_raw": travel_date,
             "dep_time_raw": dep_time_raw, "arr_time_raw": arr_time_raw,
             "duration": duration, "class": travel_class,

@@ -51,16 +51,17 @@ HEAD_H_MM = 12.1
 BADGE_BASE_MM = 6.5
 CODE_BASE_MM = 24.0
 CITY_BASE_MM = 31.0
-TIME_BASE_MM = 39.4
-DATE_BASE_MM = 44.8
-PATH_Y_MM = 35.9
-PLANE_Y_MM = 29.5
+AIRPORT_BASE_MM = 34.9            # airport name, under the city
+TIME_BASE_MM = 42.6
+DATE_BASE_MM = 48.0
+PATH_Y_MM = 39.1
+PLANE_Y_MM = 32.7
 ARC_LIFT_MM = 3.53
-TERMINAL_TOP_MM = 47.6
+TERMINAL_TOP_MM = 50.8
 TERMINAL_H_MM = 5.5
 # Gaps, so a row that is not shown closes up instead of leaving a band of
 # white where the reference happened to put one.
-DATE_BLOCK_END_MM = 47.6          # where the date row stops
+DATE_BLOCK_END_MM = 50.8          # where the date row stops
 BAGGAGE_GAP_MM = 6.6              # above the baggage row
 CARD_TAIL_MM = 5.1                # below the last row, to the card foot
 
@@ -621,6 +622,25 @@ def draw_flight(t, flight, index, total):
            size=11, color=MUTED)
     t.text(right_x, below(CITY_BASE_MM), flight.get("to_city") or flight.get("to_code", ""),
            size=11, color=MUTED, align="right")
+
+    # The airport itself, under the city it serves. A handful of official
+    # names run to 100mm, so they shrink a little and then elide rather than
+    # running into the flight path.
+    name_room = (PAGE_W / 2 - 21.9 * MM) - left_x - 2.0 * MM
+    for name, x, align in ((flight.get("from_airport"), left_x, "left"),
+                           (flight.get("to_airport"), right_x, "right")):
+        name = (name or "").strip()
+        if not name:
+            continue
+        size = 7.5
+        while size > 6.0 and t.c.stringWidth(name, FONT, size) > name_room:
+            size -= 0.25
+        if t.c.stringWidth(name, FONT, size) > name_room:
+            while name and t.c.stringWidth(name + "…", FONT, size) > name_room:
+                name = name[:-1].rstrip(" ,-")
+            name += "…" if name else ""
+        if name:
+            t.text(x, below(AIRPORT_BASE_MM), name, size=size, color=FAINT, align=align)
     # 24-hour, as the footer states. Airlines publish schedules this way and
     # it cannot be misread the way "5:35" without a suffix can.
     t.text(left_x, below(TIME_BASE_MM), flight.get("dep_time_raw") or "\u2014",

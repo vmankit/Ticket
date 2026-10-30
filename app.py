@@ -165,7 +165,11 @@ app = Flask(__name__)
 DEV_SECRET_KEY = "dev-secret-key-change-me"
 _secret_key = os.environ.get("SECRET_KEY", "").strip()
 IS_PRODUCTION = os.environ.get("FLASK_ENV", "").lower() == "production" or bool(
-    os.environ.get("RENDER") or os.environ.get("DYNO")
+    # VERCEL belongs here as much as RENDER and DYNO: without it a Vercel
+    # deployment fell through to the development key below, and a session
+    # cookie signed with a constant published in this repository can be forged
+    # by anyone who reads it - which walks straight past the login gate.
+    os.environ.get("RENDER") or os.environ.get("DYNO") or os.environ.get("VERCEL")
 )
 if not _secret_key:
     if IS_PRODUCTION:

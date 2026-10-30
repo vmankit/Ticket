@@ -253,7 +253,12 @@ class TicketCanvas:
     def section(self, label, at=None):
         self.space(40)
         if at is not None:
-            self.anchor(at)
+            target = self.at(at)
+            # The anchor is where the label sits when the blocks above it are
+            # the expected height. Once they have flowed past it, anchoring
+            # would leave the label butted against the block above, so it
+            # falls back to the ordinary gap between sections.
+            self.y = target if self.y > target else self.y - 16
         else:
             self.y -= 16
         self.tracked(MARGIN, self.y, label, size=9, tracking=2.6)
@@ -345,14 +350,14 @@ def draw_header(t, *, company, pnr, booking_id, status, show_agency=True):
     # Metadata strip: E-ticket · Booking ID on left, Status badge right-aligned
     meta_mm = divider_mm + META_GAP_MM
     meta_y = t.at(meta_mm)
+    # The supplier's booking reference is not printed: it is a 20-character
+    # internal id that means nothing to the traveller and nothing at a gate,
+    # where the PNR above is what gets quoted. It is still recorded against
+    # the booking.
     if show_agency:
         t.tracked(MARGIN, meta_y, "E-TICKET", size=8.0, tracking=1.5, color=MUTED)
-        et_w = t.c.stringWidth("E-TICKET", FONT_BOLD, 8.0) + 7 * 1.5
-        if booking_id:
-            t.text(MARGIN + et_w + 3 * MM, meta_y, f"·   Booking ID: {booking_id}", size=8.5, color=MUTED)
     else:
-        booking_str = f"Booking ID: {booking_id}" if booking_id else "E-Ticket"
-        t.text(MARGIN, meta_y, booking_str, size=8.8, color=MUTED)
+        t.text(MARGIN, meta_y, "E-Ticket", size=8.8, color=MUTED)
 
     status_str = status.upper()
     colour = STATUS_COLORS.get(status, STATUS_COLORS["Confirmed"])

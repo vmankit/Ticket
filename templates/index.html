@@ -527,7 +527,7 @@ Example:
                         </div>
                         <div class="form-group">
                             <label>Paid By</label>
-                            <select name="payment_method">
+                            <select name="payment_method" id="paymentMethod" onchange="togglePaymentRef()">
                                 <option value="UPI" selected>UPI</option>
                                 <option value="Bank Transfer">Bank Transfer</option>
                                 <option value="Cash">Cash</option>
@@ -536,9 +536,9 @@ Example:
                                 <option value="NONE">Don't show</option>
                             </select>
                         </div>
-                        <div class="form-group">
-                            <label>Last 4 digits / Ref</label>
-                            <input type="text" name="payment_ref" inputmode="numeric" maxlength="4" placeholder="e.g. 4242">
+                        <div class="form-group" id="paymentRefGroup" hidden>
+                            <label>Card Last 4 Digits</label>
+                            <input type="text" name="payment_ref" id="paymentRef" inputmode="numeric" maxlength="4" placeholder="e.g. 4242">
                             <div class="helper">Sirf aakhri 4 digit chhapenge. Poora card number kabhi nahi.</div>
                         </div>
                     </div>
@@ -580,6 +580,17 @@ function csrfToken(){
 function showToast(msg,dur=3000){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),dur)}
 
 // ─── Fare calculation ─────────────────────────────────────
+// Only a card has digits worth naming; the rest would just be a stray number
+// on the ticket.
+function togglePaymentRef(){
+    const group=document.getElementById('paymentRefGroup');
+    const sel=document.getElementById('paymentMethod');
+    if(!group||!sel) return;
+    const isCard=sel.value==='Card';
+    group.hidden=!isCard;
+    if(!isCard){const ref=document.getElementById('paymentRef'); if(ref) ref.value='';}
+}
+
 function calcTotal(){
     const net=parseFloat(document.getElementById('netPrice').value)||0;
     const markup=parseFloat((document.getElementById('markup')||{}).value)||0;

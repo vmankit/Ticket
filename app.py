@@ -2159,10 +2159,12 @@ def generate_ticket():
     # Only ever the last four digits reach the ticket. A full card number is
     # cut down to four here rather than trusted from the form, so pasting one
     # in cannot put it on a document that gets emailed around.
-    pay_ref = re.sub(r"\D", "", request.form.get("payment_ref", ""))[-4:]
-    if payment_method and pay_ref:
-        noun = "ending" if payment_method.lower() in ("card", "credit card", "debit card") else "ref"
-        payment_method = f"{payment_method} {noun} {pay_ref}"
+    # Only a card is named by its digits; a UPI or cash payment has nothing
+    # the traveller would recognise, so the field is ignored for those.
+    if payment_method.lower() in ("card", "credit card", "debit card"):
+        pay_ref = re.sub(r"\D", "", request.form.get("payment_ref", ""))[-4:]
+        if pay_ref:
+            payment_method = f"{payment_method} ending {pay_ref}"
 
     # The issue stamp defaults to now, but a ticket is sometimes written up
     # after the fact and has to carry the time it was actually issued.

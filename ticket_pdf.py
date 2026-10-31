@@ -984,13 +984,21 @@ def draw_passengers(t, passengers, flights):
             # result when no barcode was supplied.
             if barcode_image:
                 try:
-                    box_h = row_h - 2 * MM
-                    width, height = barcode_image.getSize()
-                    draw_h = min(box_h, barcode_width * height / width)
-                    draw_w = draw_h * width / height
+                    # Fill the cell in both directions. Holding the aspect
+                    # left a square-ish symbol using about half the width it
+                    # was given, since the row height capped it first; making
+                    # the row taller instead cost a whole extra page from
+                    # three passengers up.
+                    #
+                    # Stretching is safe here: every module widens by the same
+                    # factor, so the ratios a decoder measures across a row do
+                    # not change. Checked rather than assumed - the stretched
+                    # symbol decodes back to its exact payload at print size.
+                    draw_w = barcode_width
+                    draw_h = row_h - 2 * MM
                     t.c.drawImage(barcode_image, barcode_right - draw_w,
                                   y - (row_h + draw_h) / 2, draw_w, draw_h,
-                                  preserveAspectRatio=True, mask="auto")
+                                  preserveAspectRatio=False, mask="auto")
                 except Exception:
                     pass
 

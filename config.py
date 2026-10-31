@@ -3,7 +3,7 @@ COMPANY = {
     "tagline": "Your Trusted Travel Partner",
     "email": "ankit.gupta200392@gmail.com",
     "phone": "+91 7759069422",
-    "address": "NEW ASHOK NAGAR, Delhi, India",
+    "address": "New Ashok Nagar, Delhi, India",
     "pincode": "110096",
 }
 

@@ -341,10 +341,13 @@ def draw_header(t, *, company, pnr, booking_id, status, show_agency=True):
     phone = (company.get("phone") or "").strip()
     addr = (company.get("address") or "").strip()
     pincode = (company.get("pincode") or "").strip()
-    if pincode and str(pincode) not in addr:
-        addr = f"{addr} - {pincode}"
+    # Drop the country before the pincode goes on, not after: appending first
+    # buries ", India" mid-string where the check below can no longer see it,
+    # and the line reads "Delhi, India - 110096".
     if addr.endswith(", India"):
         addr = addr[:-7].strip()
+    if pincode and str(pincode) not in addr:
+        addr = f"{addr} - {pincode}" if addr else str(pincode)
 
     # Phone and address as one quiet line under the name. They were two lines
     # with the phone set bold, which gave the block three competing weights

@@ -33,15 +33,15 @@ CONTENT_W = PAGE_W - 2 * MARGIN
 # Header
 # One band, three columns, two rows. Everything on the top row shares a
 # baseline so the columns read as one line rather than a staggered stack.
-BRAND_BASE_MM = 17.0              # agency name, left
-ETICKET_BASE_MM = 17.0            # document type, centred
-STATUS_BASE_MM = 17.0             # status pill, right
-CONTACT_BASE_MM = 22.6            # phone and address, one quiet line under the name
+ETICKET_BASE_MM = 11.4            # document type, centred on its own top row
+BRAND_BASE_MM = 20.6              # agency name, left
+STATUS_BASE_MM = 20.6             # status pill, right
+CONTACT_BASE_MM = 26.2            # phone and address, one quiet line under the name
 CONTACT_LEADING_MM = 3.2
 CONTACT_MAX_LINES = 2
-PNR_BOX_TOP_MM = 20.2             # rounded badge the code sits in, under the pill
+PNR_BOX_TOP_MM = 28.4             # rounded badge the code sits in, under the pill
 PNR_BOX_H_MM = 7.8
-DIVIDER_BASE_MM = 32.4
+DIVIDER_BASE_MM = 34.0
 
 # Itinerary
 ITINERARY_BASE_MM = 42.0
@@ -277,12 +277,12 @@ def _fmt(value, fallback="—"):
 
 
 def draw_header(t, *, company, pnr, booking_id, status, show_agency=True):
-    """Clean, balanced two-tier executive airline header.
+    """Clean, balanced executive airline header.
 
-    Three columns over one hairline:
-      - Left:   agency name, phone, address
-      - Centre: E-TICKET, naming the document
-      - Right:  status pill over the PNR badge
+    E-TICKET names the document on a centred row of its own at the top.
+    Everything else hangs below it, over one hairline:
+      - Left:  agency name, then phone and address
+      - Right: status pill, then the PNR badge
     """
     right = PAGE_W - MARGIN
 
@@ -305,27 +305,38 @@ def draw_header(t, *, company, pnr, booking_id, status, show_agency=True):
         pnr_size -= 0.5
     pnr_box_w = _badge_w(pnr_size)
 
+    # The title row is clear of everything, so each row below is held off
+    # only by whatever shares it: the name by the status pill, the contact
+    # line by the PNR badge.
+    status_str = status.upper()
+    pill_w = t.c.stringWidth(status_str, FONT_BOLD, 7.0) + 2 * (3.0 * MM)
+    agency_limit = right - pill_w - 6.0 * MM
+    contact_limit = right - pnr_box_w - 6.0 * MM
+
     label = "E-TICKET"
-    label_size = 9.0
-    tracking = 3.2
+    label_size = 9.4
+    tracking = 3.4
     label_w = t.c.stringWidth(label, FONT_BOLD, label_size) + (len(label) - 1) * tracking
-    label_x = PAGE_W / 2 - label_w / 2
+    t.tracked(PAGE_W / 2 - label_w / 2, t.at(ETICKET_BASE_MM), label,
+              size=label_size, tracking=tracking, color=INK)
 
-    agency_limit = min(right - pnr_box_w - 6.0 * MM, label_x - 5.0 * MM)
-
-    wordmark = company["name"].upper() if show_agency else "E-TICKET"
+    # Without an agency the title is the only thing in the header, so the
+    # row below it is left empty rather than repeating the word.
+    wordmark = company["name"].upper() if show_agency else ""
     brand_x = MARGIN
     brand_size = 14.0
     room = agency_limit - brand_x
-    while brand_size > 10.5 and t.c.stringWidth(wordmark, FONT_BOLD, brand_size) > room:
-        brand_size -= 0.25
-    # Shrinking alone bottoms out at 10.5pt, and a trading name longer than
-    # that allows used to run straight through the centred label. Clip it.
-    if t.c.stringWidth(wordmark, FONT_BOLD, brand_size) > room:
-        while wordmark and t.c.stringWidth(wordmark + "…", FONT_BOLD, brand_size) > room:
-            wordmark = wordmark[:-1]
-        wordmark = wordmark.rstrip() + "…"
-    t.text(brand_x, t.at(BRAND_BASE_MM), wordmark, size=brand_size, font=FONT_BOLD, color=INK)
+    if wordmark:
+        while brand_size > 10.5 and t.c.stringWidth(wordmark, FONT_BOLD, brand_size) > room:
+            brand_size -= 0.25
+        # Shrinking alone bottoms out at 10.5pt, and a trading name longer
+        # than that allows would run into the status pill. Clip it.
+        if t.c.stringWidth(wordmark, FONT_BOLD, brand_size) > room:
+            while wordmark and t.c.stringWidth(wordmark + "…", FONT_BOLD, brand_size) > room:
+                wordmark = wordmark[:-1]
+            wordmark = wordmark.rstrip() + "…"
+        t.text(brand_x, t.at(BRAND_BASE_MM), wordmark, size=brand_size,
+               font=FONT_BOLD, color=INK)
 
     phone = (company.get("phone") or "").strip()
     addr = (company.get("address") or "").strip()
@@ -342,25 +353,14 @@ def draw_header(t, *, company, pnr, booking_id, status, show_agency=True):
     if show_agency:
         contact = "  ·  ".join(part for part in (phone, addr) if part)
         if contact:
-            lines = _wrap_to_width(t.c, contact, agency_limit - brand_x, 8.0, CONTACT_MAX_LINES)
+            lines = _wrap_to_width(t.c, contact, contact_limit - brand_x, 8.0, CONTACT_MAX_LINES)
             for n, line in enumerate(lines):
                 t.text(brand_x, t.at(CONTACT_BASE_MM + n * CONTACT_LEADING_MM), line,
                        size=8.0, font=FONT, color=MUTED)
             if lines:
                 contact_bottom_mm = CONTACT_BASE_MM + (len(lines) - 1) * CONTACT_LEADING_MM
 
-    # Centre: what the document is. The supplier's booking reference that used
-    # to sit here is a 20-character internal id that means nothing to the
-    # traveller and nothing at a gate, where the PNR is what gets quoted.
-    t.tracked(label_x, t.at(ETICKET_BASE_MM), label,
-              size=label_size, tracking=tracking, color=INK)
-    # A short rule under it, so the centre column has a shape of its own and
-    # does not read as a word floating in the gap.
-    t.rule(label_x, t.at(ETICKET_BASE_MM) - 2.4, label_w, color=LINE, line_width=0.6)
-
     # Right: status over the PNR badge, so the two references read together.
-    status_str = status.upper()
-    pill_w = t.c.stringWidth(status_str, FONT_BOLD, 7.0) + 2 * (3.0 * MM)
     t.pill(right - pill_w, t.at(STATUS_BASE_MM) - 2.2, status_str,
            fill=STATUS_TINTS.get(status, STATUS_TINTS["Confirmed"]),
            color=STATUS_COLORS.get(status, STATUS_COLORS["Confirmed"]),

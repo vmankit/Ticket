@@ -34,6 +34,10 @@ CONTENT_W = PAGE_W - 2 * MARGIN
 # One band, three columns, two rows. Everything on the top row shares a
 # baseline so the columns read as one line rather than a staggered stack.
 ETICKET_BASE_MM = 11.4            # document type, centred on its own top row
+MARK_MM = 9.6                     # agency monogram, square, left of the name
+MARK_TOP_MM = 17.3                # set so the mark spans the name and contact rows
+MARK_RADIUS_MM = 2.5
+MARK_GAP_MM = 3.4                 # mark to the name beside it
 BRAND_BASE_MM = 20.6              # agency name, left
 STATUS_BASE_MM = 20.6             # status pill, right
 CONTACT_BASE_MM = 26.2            # phone and address, one quiet line under the name
@@ -132,6 +136,7 @@ MUTED = HexColor("#6B7280")
 FAINT = HexColor("#9CA3AF")
 LINE = HexColor("#E5E7EB")
 WASH = HexColor("#F4F5F7")
+ACCENT = HexColor("#0E9488")      # the generator's own teal, carried onto the ticket
 
 STATUS_TINTS = {
     "Confirmed": HexColor("#E8F3EC"),
@@ -317,13 +322,43 @@ def draw_header(t, *, company, pnr, booking_id, status, show_agency=True):
     label_size = 9.4
     tracking = 3.4
     label_w = t.c.stringWidth(label, FONT_BOLD, label_size) + (len(label) - 1) * tracking
+    # Set in MUTED, not INK: the word only names the document, and at full
+    # strength it was competing with the agency name for the eye.
     t.tracked(PAGE_W / 2 - label_w / 2, t.at(ETICKET_BASE_MM), label,
-              size=label_size, tracking=tracking, color=INK)
+              size=label_size, tracking=tracking, color=MUTED)
 
     # Without an agency the title is the only thing in the header, so the
     # row below it is left empty rather than repeating the word.
     wordmark = company["name"].upper() if show_agency else ""
     brand_x = MARGIN
+
+    # The same rounded teal monogram the generator shows in its own header,
+    # so a ticket and the site that produced it read as one brand. Falls back
+    # to the first letters of the trading name when no initials are stored.
+    if show_agency:
+        initials = (company.get("initials") or "").strip().upper()
+        if not initials:
+            words = re.findall(r"[A-Za-z]+", company.get("name") or "")
+            initials = "".join(w[0] for w in words)[:2].upper()
+        if initials:
+            mark_w = MARK_MM * MM
+            t.rounded(MARGIN, t.at(MARK_TOP_MM + MARK_MM), mark_w, mark_w,
+                      r=MARK_RADIUS_MM * MM, fill=ACCENT, stroke=None)
+            mark_size = 9.0
+            while mark_size > 5.5 and t.c.stringWidth(initials, FONT_BOLD, mark_size) > mark_w - 2.2 * MM:
+                mark_size -= 0.25
+            # Baseline sits half a cap-height below the square's centre so the
+            # letters look centred rather than merely placed.
+            cap = pdfmetrics.getAscent(FONT_BOLD) / 1000.0 * mark_size * 0.72
+            t.c.saveState()
+            t.c.setFillColor(white)
+            t.c.setFont(FONT_BOLD, mark_size)
+            t.c.drawCentredString(MARGIN + mark_w / 2,
+                                  t.at(MARK_TOP_MM + MARK_MM / 2) - cap / 2,
+                                  initials)
+            t.c.restoreState()
+            brand_x = MARGIN + mark_w + MARK_GAP_MM * MM
+
     brand_size = 14.0
     room = agency_limit - brand_x
     if wordmark:

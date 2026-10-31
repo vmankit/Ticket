@@ -137,6 +137,7 @@ FAINT = HexColor("#9CA3AF")
 LINE = HexColor("#E5E7EB")
 WASH = HexColor("#F4F5F7")
 ACCENT = HexColor("#0E9488")      # the generator's own teal, carried onto the ticket
+ACCENT_DEEP = HexColor("#0B5F58")  # the contrail band across the agency mark
 
 STATUS_TINTS = {
     "Confirmed": HexColor("#E8F3EC"),
@@ -524,50 +525,53 @@ def _badge_text_color(brand_color_hex):
 
 #: The mark's parts in plate fractions, so the same geometry serves the 9.6mm
 #: ticket badge, the site header and the favicon without being redrawn by eye.
-#: Keep in step with the SVG in templates/index.html.
-MARK_PLANE = {
-    "scale": 0.33, "cx": 0.74, "cy": 0.78,
-    "wing": ((0.94, 0.86), (0.06, 0.46), (0.46, 0.38)),
-    "body": ((0.94, 0.86), (0.52, 0.40), (0.44, 0.08)),
-    "seam": ((0.94, 0.86), (0.48, 0.395), (0.515, 0.33)),
-}
-MARK_TEXT_CX = 0.46        # initials sit left of the plane, not under it
-MARK_TEXT_BASE = 0.20
-MARK_TEXT_SIZE = 0.40      # of the plate; shrinks when the letters are wide
-MARK_TEXT_ROOM = 0.60
+#: Keep in step with the SVG in templates/index.html, which mirrors these
+#: numbers flipped for SVG's downward y.
+MARK_BAND = ((-0.10, 0.62), (1.10, 1.22), (1.10, 0.74), (-0.10, 0.14))
+MARK_JET = ((0.90, 0.91), (0.38, 0.70), (0.56, 0.645), (0.52, 0.55))
+MARK_TEXT_CX = 0.50
+MARK_TEXT_BASE = 0.15
+MARK_TEXT_SIZE = 0.37      # of the plate; shrinks when the letters are wide
+MARK_TEXT_ROOM = 0.64
 
 
-def draw_agency_mark(c, x, y, size, initials, plate=ACCENT, ink=white):
-    """The agency badge: initials on a rounded plate, paper plane above them.
+def draw_agency_mark(c, x, y, size, initials, plate=ACCENT, band=ACCENT_DEEP, ink=white):
+    """The agency badge: a contrail sweeping over the initials, jet at its head.
 
     (x, y) is the bottom-left corner, as reportlab counts it.
     """
     c.saveState()
+
+    # The band runs past both edges, so it is clipped to the plate rather
+    # than mitred to fit - the corners stay exactly the plate's radius.
+    clip = c.beginPath()
+    clip.roundRect(x, y, size, size, 0.26 * size)
+    c.clipPath(clip, stroke=0, fill=0)
+
     c.setFillColor(plate)
-    c.roundRect(x, y, size, size, 0.26 * size, stroke=0, fill=1)
+    c.rect(x, y, size, size, stroke=0, fill=1)
 
-    p = MARK_PLANE
-    def at(u, v):
-        return (x + (p["cx"] + (u - 0.5) * p["scale"]) * size,
-                y + (p["cy"] + (v - 0.5) * p["scale"]) * size)
+    c.setFillColor(band)
+    stripe = c.beginPath()
+    stripe.moveTo(x + MARK_BAND[0][0] * size, y + MARK_BAND[0][1] * size)
+    for u, v in MARK_BAND[1:]:
+        stripe.lineTo(x + u * size, y + v * size)
+    stripe.close()
+    c.drawPath(stripe, stroke=0, fill=1)
+    c.restoreState()
 
-    def facet(points, colour):
-        c.setFillColor(colour)
-        path = c.beginPath()
-        path.moveTo(*at(*points[0]))
-        for point in points[1:]:
-            path.lineTo(*at(*point))
-        path.close()
-        c.drawPath(path, stroke=0, fill=1)
-
-    facet(p["wing"], ink)
-    facet(p["body"], ink)
-    facet(p["seam"], plate)   # cuts the fold, so it reads as paper not a blob
+    c.saveState()
+    c.setFillColor(ink)
+    jet = c.beginPath()
+    jet.moveTo(x + MARK_JET[0][0] * size, y + MARK_JET[0][1] * size)
+    for u, v in MARK_JET[1:]:
+        jet.lineTo(x + u * size, y + v * size)
+    jet.close()
+    c.drawPath(jet, stroke=0, fill=1)
 
     text_size = MARK_TEXT_SIZE * size
     while text_size > 0.18 * size and c.stringWidth(initials, FONT_BOLD, text_size) > MARK_TEXT_ROOM * size:
         text_size -= 0.01 * size
-    c.setFillColor(ink)
     c.setFont(FONT_BOLD, text_size)
     c.drawCentredString(x + MARK_TEXT_CX * size, y + MARK_TEXT_BASE * size, initials)
     c.restoreState()

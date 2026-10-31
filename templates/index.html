@@ -238,7 +238,13 @@
 
         /* AI Prompt Section */
         .ai-section{border-top:1px solid var(--border);margin-top:22px;padding-top:20px}
-        .ai-section .section-title{font-size:.7rem;font-weight:800;letter-spacing:1.6px;text-transform:uppercase;color:var(--primary-light);margin-bottom:12px;padding-bottom:6px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px}
+        .ai-section>summary.section-title{font-size:.7rem;font-weight:800;letter-spacing:1.6px;text-transform:uppercase;color:var(--primary-light);margin-bottom:12px;padding-bottom:6px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none;list-style:none}
+        .ai-section>summary::-webkit-details-marker{display:none}
+        .ai-section>summary:hover{color:var(--text)}
+        .ai-chevron{margin-left:auto;font-size:.8rem;color:var(--text-muted);transition:transform .2s}
+        .ai-section[open]>summary .ai-chevron{transform:rotate(180deg)}
+        /* Closed, it is just one quiet line - no trailing rule or gap. */
+        .ai-section:not([open])>summary.section-title{margin-bottom:0;padding-bottom:0;border-bottom:none}
         .ai-section .section-title .dot{width:8px;height:8px;background:var(--primary-light);border-radius:2px;transform:rotate(45deg)}
         .ai-steps{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-bottom:16px}
         @media(max-width:768px){.ai-steps{grid-template-columns:1fr}}
@@ -304,8 +310,8 @@
                                 <button type="button" class="btn-generate btn-quiet" id="sampleFillBtn">Fill Sample Ticket</button>
                             </div>
                     <!-- ── AI-Assisted Extraction ────────────────── -->
-                    <div class="ai-section">
-                        <div class="section-title"><span class="dot"></span>AI-ASSISTED EXTRACTION <span class="ai-badge">✨ ChatGPT / Gemini</span></div>
+                    <details class="ai-section">
+                        <summary class="section-title"><span class="dot"></span>AI-ASSISTED EXTRACTION <span class="ai-badge">✨ ChatGPT / Gemini</span><span class="ai-chevron">▾</span></summary>
                         <div class="ai-steps">
                             <div class="ai-step">
                                 <span class="step-num">STEP 1</span>
@@ -346,7 +352,7 @@ Example:
                             </button>
                         </div>
                         <div class="ai-status" id="aiStatus"></div>
-                    </div>
+                    </details>
                 </div>
             </div>
 

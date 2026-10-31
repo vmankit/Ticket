@@ -39,8 +39,8 @@ STATUS_BASE_MM = 17.0             # status pill, right
 CONTACT_BASE_MM = 22.6            # phone and address, one quiet line under the name
 CONTACT_LEADING_MM = 3.2
 CONTACT_MAX_LINES = 2
-PNR_BOX_TOP_MM = 20.4             # rounded badge the code sits in, under the pill
-PNR_BOX_H_MM = 9.2
+PNR_BOX_TOP_MM = 20.2             # rounded badge the code sits in, under the pill
+PNR_BOX_H_MM = 7.8
 DIVIDER_BASE_MM = 32.4
 
 # Itinerary
@@ -291,25 +291,40 @@ def draw_header(t, *, company, pnr, booking_id, status, show_agency=True):
     # block has to be held to whatever room the badge leaves.
     pnr_text = pnr or "—"
     pnr_label = "PNRs" if pnr and "/" in pnr else "PNR"
-    pnr_label_w = t.c.stringWidth(pnr_label, FONT_BOLD, 7) + len(pnr_label) * 1.6
-    pnr_size = 19.0
-    pnr_pad = 3.8 * MM
+    pnr_label_size = 6.4
+    pnr_label_w = t.c.stringWidth(pnr_label, FONT_BOLD, pnr_label_size) + len(pnr_label) * 1.4
+    pnr_size = 13.5
+    pnr_pad = 3.0 * MM
+    pnr_gap = 2.2 * MM
 
     def _badge_w(size):
-        return (pnr_label_w + 3.0 * MM
+        return (pnr_label_w + pnr_gap
                 + t.c.stringWidth(pnr_text, FONT_BOLD, size) + 2 * pnr_pad)
 
-    while pnr_size > 10 and _badge_w(pnr_size) > CONTENT_W * 0.52:
+    while pnr_size > 8.5 and _badge_w(pnr_size) > CONTENT_W * 0.42:
         pnr_size -= 0.5
     pnr_box_w = _badge_w(pnr_size)
-    agency_limit = right - pnr_box_w - 6.0 * MM
+
+    label = "E-TICKET"
+    label_size = 9.0
+    tracking = 3.2
+    label_w = t.c.stringWidth(label, FONT_BOLD, label_size) + (len(label) - 1) * tracking
+    label_x = PAGE_W / 2 - label_w / 2
+
+    agency_limit = min(right - pnr_box_w - 6.0 * MM, label_x - 5.0 * MM)
 
     wordmark = company["name"].upper() if show_agency else "E-TICKET"
     brand_x = MARGIN
-    brand_size = 15.0
+    brand_size = 14.0
     room = agency_limit - brand_x
-    while brand_size > 11 and t.c.stringWidth(wordmark, FONT_BOLD, brand_size) > room:
+    while brand_size > 10.5 and t.c.stringWidth(wordmark, FONT_BOLD, brand_size) > room:
         brand_size -= 0.25
+    # Shrinking alone bottoms out at 10.5pt, and a trading name longer than
+    # that allows used to run straight through the centred label. Clip it.
+    if t.c.stringWidth(wordmark, FONT_BOLD, brand_size) > room:
+        while wordmark and t.c.stringWidth(wordmark + "…", FONT_BOLD, brand_size) > room:
+            wordmark = wordmark[:-1]
+        wordmark = wordmark.rstrip() + "…"
     t.text(brand_x, t.at(BRAND_BASE_MM), wordmark, size=brand_size, font=FONT_BOLD, color=INK)
 
     phone = (company.get("phone") or "").strip()
@@ -337,11 +352,11 @@ def draw_header(t, *, company, pnr, booking_id, status, show_agency=True):
     # Centre: what the document is. The supplier's booking reference that used
     # to sit here is a 20-character internal id that means nothing to the
     # traveller and nothing at a gate, where the PNR is what gets quoted.
-    label = "E-TICKET"
-    tracking = 2.4
-    label_w = t.c.stringWidth(label, FONT_BOLD, 8.4) + (len(label) - 1) * tracking
-    t.tracked(PAGE_W / 2 - label_w / 2, t.at(ETICKET_BASE_MM), label,
-              size=8.4, tracking=tracking, color=MUTED)
+    t.tracked(label_x, t.at(ETICKET_BASE_MM), label,
+              size=label_size, tracking=tracking, color=INK)
+    # A short rule under it, so the centre column has a shape of its own and
+    # does not read as a word floating in the gap.
+    t.rule(label_x, t.at(ETICKET_BASE_MM) - 2.4, label_w, color=LINE, line_width=0.6)
 
     # Right: status over the PNR badge, so the two references read together.
     status_str = status.upper()
@@ -361,8 +376,10 @@ def draw_header(t, *, company, pnr, booking_id, status, show_agency=True):
     baseline = box_top - box_h + (box_h - pnr_size * 0.716) / 2
     t.text(right - pnr_pad, baseline, pnr_text, size=pnr_size,
            font=FONT_BOLD, color=INK, align="right")
+    # The label rides on the code's own baseline, a size down, rather than
+    # sitting in the far corner of the box with a gap between the two.
     t.tracked(right - pnr_box_w + pnr_pad, baseline, pnr_label,
-              size=7, tracking=1.6, color=FAINT)
+              size=pnr_label_size, tracking=1.3, color=FAINT)
 
     # Hairline divider, below whichever column runs deeper.
     divider_mm = max(DIVIDER_BASE_MM, contact_bottom_mm + 3.2,

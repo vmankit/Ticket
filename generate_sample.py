@@ -12,6 +12,14 @@ def generate_sample_pdf(output_path="sample_ticket.pdf"):
     app.config["WTF_CSRF_ENABLED"] = False
     client = app.test_client()
 
+    # Every page is behind the passcode gate now, so an unauthenticated test
+    # client is redirected to /login and writes the login page to the .pdf.
+    # The session is marked signed-in directly rather than posting the
+    # passcode, which keeps it out of this script.
+    with client.session_transaction() as session:
+        session["authed"] = True
+        session["seen_at"] = datetime.now().timestamp()
+
     today_str = datetime.now().strftime("%Y-%m-%d")
 
     data = {
@@ -21,8 +29,8 @@ def generate_sample_pdf(output_path="sample_ticket.pdf"):
         "booking_platform": "MakeMyTrip",
         "customer_email": "traveler@example.com",
         "customer_phone": "+91 9876543210",
-        "base_fare": "6000",
-        "taxes_fees": "1200",
+        "net_price": "7200",
+        "markup": "500",
         "flight_count": "2",
         # Leg 1: New Delhi (DEL) to Mumbai (BOM)
         "flight_0_flight_no": "6E 1234",

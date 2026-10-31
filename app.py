@@ -1976,18 +1976,22 @@ def build_barcode_payload(*, pnr, flight, passengers, booking_id):
                     for key, value in fields if str(value or "").strip())
 
 
-def generate_pdf417_barcode(payload, scale=3, ratio=3, padding=4):
+def generate_pdf417_barcode(payload, scale=3, ratio=3, padding=4, columns=4):
     """Render `payload` as a PDF417 symbol, or return (None, None).
 
     Falls back rather than raising: a ticket without a scannable symbol is
     still a valid ticket, but one that fails to render is not a ticket at all.
+
+    Four columns, not six: the same data over fewer columns runs to more
+    rows, giving the squarer, denser block with heavy start and stop bars
+    that airline barcodes have. Six made a thin letterbox strip.
     """
     text = (payload or "").strip()
     if not text:
         return None, None
     try:
         from pdf417gen import encode, render_image
-        codes = encode(text, columns=6, security_level=4)
+        codes = encode(text, columns=columns, security_level=4)
         img = render_image(codes, scale=scale, ratio=ratio, padding=padding)
         buffer = io.BytesIO()
         img.convert("RGB").save(buffer, format="PNG")
@@ -2316,8 +2320,13 @@ def generate_ticket():
         except ValueError:
             checkin_closing = ""
 
+        # An image the agent attached themselves is theirs and is printed as
+        # given. One lifted off an uploaded source ticket is not: it encodes
+        # that booking, not this one, so it is only a stand-in until the
+        # symbol for this ticket is built further down.
         barcode_file = request.files.get(f"{prefix}barcode")
         temp_barcode_path = save_barcode_upload(barcode_file)
+        barcode_is_agents_own = bool(temp_barcode_path)
         if not temp_barcode_path:
             bc_token = request.form.get(f"{prefix}barcode_token", "").strip() or request.form.get("auto_barcode_token", "").strip()
             bc_data = request.form.get(f"{prefix}barcode_data", "").strip() or request.form.get("auto_barcode_data", "").strip()
@@ -2367,6 +2376,7 @@ def generate_ticket():
             "from_terminal": from_terminal,
             "to_terminal": to_terminal,
             "barcode_path": temp_barcode_path,
+            "barcode_is_agents_own": barcode_is_agents_own,
             "checkin_closing": checkin_closing,
             "manual_layover": manual_layover,
             "segment_pnr": segment_pnr
@@ -2490,8 +2500,12 @@ def generate_ticket():
     # Scannable symbol per segment. Generated here rather than in the flight
     # loop above because the payload names the traveller, who is only known
     # once the passenger rows have been read.
+    # This overrides a barcode auto-lifted from an uploaded source ticket.
+    # That image belongs to the original booking - printing it here put a
+    # different symbol on every ticket and encoded someone else's journey.
+    # Only an image the agent attached deliberately is left alone.
     for flight in flights:
-        if flight.get("barcode_path"):
+        if flight.get("barcode_is_agents_own") and flight.get("barcode_path"):
             continue
         payload = build_barcode_payload(
             pnr=flight.get("segment_pnr") or pnr,
